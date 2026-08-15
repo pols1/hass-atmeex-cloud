@@ -35,6 +35,10 @@ Compatibility fixes for Home Assistant 2026.x, and a move to this repository.
 - `manifest.json`: dropped `aiohttp` and `async-timeout` from `requirements`. Both ship
   with Home Assistant core, and declaring them makes hassfest fail the manifest check.
 - `AtmeexApi` exposes a read-only `base_url` property, used in error messages.
+- The CO₂ sensor uses `UnitOfRatio.PARTS_PER_MILLION` instead of the deprecated
+  `CONCENTRATION_PARTS_PER_MILLION`, which Home Assistant warned about on every start and
+  removes in 2027.8. The new enum landed in 2026.7, so `hacs.json` now declares that as
+  the minimum version.
 
 ### Notes
 - Verified against Home Assistant 2026.8.2 (Python 3.14, HAOS 18.2).

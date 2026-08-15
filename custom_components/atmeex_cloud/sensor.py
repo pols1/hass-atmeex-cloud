@@ -9,8 +9,8 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
+    UnitOfRatio,
     UnitOfTemperature,
-    CONCENTRATION_PARTS_PER_MILLION,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -124,7 +124,7 @@ class AtmeexBaseSensor(CoordinatorEntity, SensorEntity):
 class AtmeexCo2Sensor(AtmeexBaseSensor):
     _attr_device_class = SensorDeviceClass.CO2
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = CONCENTRATION_PARTS_PER_MILLION
+    _attr_native_unit_of_measurement = UnitOfRatio.PARTS_PER_MILLION
 
     def __init__(self, coordinator, device_id: int, device_name: str) -> None:
         super().__init__(coordinator, device_id, device_name, "co2_ppm", "CO2")

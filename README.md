@@ -17,7 +17,7 @@ Atmeex Cloud REST API, built for current Home Assistant releases.
 *   Optional humidifier control (if supported by the device).
 *   **Climate Presets**: Support for Auto and Sleep modes.
 *   **Optional Cool Mode**: You can optionally enable cooling mode (`HVACMode.COOL`) from the integration settings if your climate complex supports it.
-*   **Rich Sensors Platform**: Real-time sensors for CO2 (`co2_ppm`), indoor temperature, outdoor temperature, and humidity.
+*   **Sensors**: CO₂ (`co2_ppm`), indoor temperature and outdoor temperature.
 *   **Config Flow Re-authentication**: Seamlessly handles expired cloud tokens by prompting re-login natively in HA.
 *   Online/offline status displayed directly on the climate card.
 *   Clean asynchronous I/O using Home Assistant’s shared aiohttp client session.
@@ -63,7 +63,7 @@ You can configure the integration dynamically after setup:
 ## Compatibility
 
 Tested against **Home Assistant 2026.8** (Python 3.14, Home Assistant OS); `hacs.json`
-declares 2026.1 as the minimum. The integration follows current core APIs: shared aiohttp
+declares 2026.7 as the minimum (that is when `UnitOfRatio` landed). The integration follows current core APIs: shared aiohttp
 session, `DataUpdateCoordinator`, config-entry re-auth, and an options flow that takes
 `config_entry` from the core rather than storing it itself. See [CHANGELOG.md](CHANGELOG.md)
 for version history.
@@ -151,7 +151,7 @@ Until then, changes are verified against a live Home Assistant instance.
 `git push --tags`
 
 5. Create a GitHub Release — HACS offers updates based on published releases, so an
-   unreleased commit on `master` will not reach users.
+   unreleased commit on `main` will not reach users.
 
 ## Credits
 * 🧠 Development: [Sergei Polunovskii](https://github.com/pols1)
