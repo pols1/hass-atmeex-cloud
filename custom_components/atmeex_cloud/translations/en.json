@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Atmeex Cloud",
+        "description": "Sign in with the account you use in the Atmeex mobile app. All brizers linked to it will be added automatically.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Atmeex Cloud",
+        "description": "The saved session for {email} has expired. Enter the password again.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the Atmeex cloud. Check your credentials and whether api.iot.atmeex.com is responding.",
+      "unknown": "Unexpected error, see the Home Assistant log for details."
+    },
+    "abort": {
+      "already_configured": "This Atmeex account is already configured.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Atmeex Cloud options",
+        "data": {
+          "enable_co2": "CO₂ sensor",
+          "enable_cool": "Cool mode"
+        },
+        "data_description": {
+          "enable_co2": "Expose the CO₂ level as a separate sensor entity.",
+          "enable_cool": "Offer HVAC cool mode — only for complexes that actually support cooling."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Atmeex Cloud",
+        "description": "Войдите под той же учётной записью, что и в мобильном приложении Atmeex. Все привязанные к ней бризеры добавятся автоматически.",
+        "data": {
+          "email": "Электронная почта",
+          "password": "Пароль"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Повторный вход в Atmeex Cloud",
+        "description": "Сохранённая сессия для {email} истекла. Введите пароль заново.",
+        "data": {
+          "password": "Пароль"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Не удаётся связаться с облаком Atmeex. Проверьте учётные данные и отвечает ли api.iot.atmeex.com.",
+      "unknown": "Непредвиденная ошибка, подробности в журнале Home Assistant."
+    },
+    "abort": {
+      "already_configured": "Эта учётная запись Atmeex уже настроена.",
+      "reauth_successful": "Повторный вход выполнен."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Настройки Atmeex Cloud",
+        "data": {
+          "enable_co2": "Датчик CO₂",
+          "enable_cool": "Режим охлаждения"
+        },
+        "data_description": {
+          "enable_co2": "Показывать уровень CO₂ отдельной сущностью.",
+          "enable_cool": "Предлагать режим охлаждения — только для комплексов, которые его действительно поддерживают."
+        }
+      }
+    }
+  }
+}
