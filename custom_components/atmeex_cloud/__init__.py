@@ -14,9 +14,11 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import AtmeexApi, ApiAuthError, ApiError
+from .capabilities import describe, detect_from_payload, merge
 from .const import (
     CONF_LOCAL_ENABLED,
     CONF_LOCAL_PORT,
+    DATA_CAPABILITIES,
     DEFAULT_LOCAL_ENABLED,
     DEFAULT_LOCAL_PORT,
     DOMAIN,
@@ -92,6 +94,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "Atmeex: coordinator devices = %s",
             [d.get("id") for d in devices if isinstance(d, dict)],
         )
+        _async_learn_capabilities(hass, entry, devices, states)
         return {"devices": devices, "states": states}
 
     coordinator = DataUpdateCoordinator(
@@ -131,6 +134,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         email,
     )
     return True
+
+
+def _async_learn_capabilities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    devices: list[Any],
+    states: dict[str, Any],
+) -> None:
+    """Накопить признаки комплектации по показаниям устройств.
+
+    Модификация A7 в API не передаётся, поэтому узлы определяются по данным:
+    ненулевой co2_ppm означает, что датчик есть (в воздухе не бывает 0 ppm),
+    живая hum_room — что есть увлажнитель. Признак только добавляется, чтобы
+    секундный ноль от сбойного датчика не удалял сущность вместе с историей.
+    """
+    stored: dict[str, dict[str, bool]] = dict(entry.data.get(DATA_CAPABILITIES) or {})
+    changed = False
+
+    for dev in devices:
+        if not isinstance(dev, dict) or dev.get("id") is None:
+            continue
+        did = str(dev.get("id"))
+        found: dict[str, bool] = {}
+        for payload in (dev.get("condition"), dev.get("settings"), states.get(did)):
+            found.update(detect_from_payload(payload))
+        if not found:
+            continue
+        merged = merge(stored.get(did), found)
+        if merged != stored.get(did):
+            stored[did] = merged
+            changed = True
+            _LOGGER.info(
+                "Atmeex: комплектация устройства %s — %s", did, describe(merged)
+            )
+
+    if changed:
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, DATA_CAPABILITIES: stored}
+        )
 
 
 async def _async_setup_local_channel(

@@ -11,9 +11,13 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .capabilities import MODES as CAP_MODES
 from .const import (
+    CONF_CO2_SENSOR,
+    CONF_HUMIDIFIER,
     CONF_LOCAL_ENABLED,
     CONF_LOCAL_PORT,
+    DEFAULT_CAP_MODE,
     DEFAULT_LOCAL_ENABLED,
     DEFAULT_LOCAL_PORT,
     DOMAIN,
@@ -164,10 +168,17 @@ class AtmeexOptionsFlowHandler(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    # Комплектация определяется по показаниям (см.
+                    # capabilities.py); эти два переключателя нужны,
+                    # чтобы перебить определение вручную.
                     vol.Optional(
-                        "enable_co2",
-                        default=options.get("enable_co2", True),
-                    ): bool,
+                        CONF_CO2_SENSOR,
+                        default=options.get(CONF_CO2_SENSOR, DEFAULT_CAP_MODE),
+                    ): vol.In(CAP_MODES),
+                    vol.Optional(
+                        CONF_HUMIDIFIER,
+                        default=options.get(CONF_HUMIDIFIER, DEFAULT_CAP_MODE),
+                    ): vol.In(CAP_MODES),
                     vol.Optional(
                         "enable_cool",
                         default=options.get("enable_cool", False),

@@ -212,3 +212,58 @@ class TestChannelExchange(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestCapabilityDetection(unittest.TestCase):
+    """Комплектация A7 определяется по показаниям — модель в API не приходит."""
+
+    def setUp(self):
+        import importlib.util
+
+        path = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "custom_components"
+            / "atmeex_cloud"
+            / "capabilities.py"
+        )
+        spec = importlib.util.spec_from_file_location("atmeex_capabilities", path)
+        self.caps = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.caps)
+
+    def test_zero_co2_means_no_sensor(self):
+        """1952 кадра с живого Start: co2_ppm всегда ровно 0."""
+        found = self.caps.detect_from_payload(json.loads(STATE)["state"])
+        self.assertNotIn(self.caps.CAP_CO2, found)
+
+    def test_real_co2_reading_proves_sensor(self):
+        found = self.caps.detect_from_payload({"co2_ppm": 612})
+        self.assertTrue(found.get(self.caps.CAP_CO2))
+
+    def test_humidity_reading_proves_humidifier(self):
+        found = self.caps.detect_from_payload(json.loads(STATE)["state"])
+        self.assertTrue(found.get(self.caps.CAP_HUMIDIFIER))
+
+    def test_humidity_stage_also_proves_humidifier(self):
+        self.assertTrue(
+            self.caps.detect_from_payload({"u_hum_stg": 2}).get(self.caps.CAP_HUMIDIFIER)
+        )
+
+    def test_bare_keys_prove_nothing(self):
+        """Ключи hum_stg и co2_ppm приходят и от моделей без этих узлов."""
+        found = self.caps.detect_from_payload({"co2_ppm": 0, "hum_room": 0, "hum_stg": 0})
+        self.assertEqual(found, {})
+
+    def test_detection_is_sticky(self):
+        known = {self.caps.CAP_CO2: True}
+        merged = self.caps.merge(known, {})
+        self.assertTrue(merged[self.caps.CAP_CO2], "признак нельзя отзывать")
+
+    def test_manual_override_wins(self):
+        self.assertTrue(self.caps.resolve(self.caps.CAP_CO2, {}, self.caps.MODE_ON))
+        self.assertFalse(
+            self.caps.resolve(self.caps.CAP_CO2, {"co2": True}, self.caps.MODE_OFF)
+        )
+        self.assertTrue(
+            self.caps.resolve(self.caps.CAP_CO2, {"co2": True}, self.caps.MODE_AUTO)
+        )
+        self.assertFalse(self.caps.resolve(self.caps.CAP_CO2, {}, self.caps.MODE_AUTO))

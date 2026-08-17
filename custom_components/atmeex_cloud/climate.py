@@ -22,7 +22,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 
-from .const import DOMAIN
+from .capabilities import CAP_HUMIDIFIER, resolve
+from .const import CONF_HUMIDIFIER, DATA_CAPABILITIES, DEFAULT_CAP_MODE, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -236,8 +237,21 @@ class AtmeexClimateEntity(CoordinatorEntity, ClimateEntity):
         return features
 
     def _has_humidifier(self) -> bool:
-        stg = self._cond.get("hum_stg")
-        return isinstance(stg, (int, float)) or ("hum_stg" in self._cond)
+        """Есть ли увлажнитель у этой модификации A7.
+
+        По наличию ключа hum_stg судить нельзя: он приходит и от Simple/Flow,
+        где увлажнять нечем. Спрашиваем накопленную комплектацию, которую
+        можно перебить переключателем в настройках.
+        """
+        entry = self.coordinator.config_entry
+        if entry is None:
+            return False
+        detected = (entry.data.get(DATA_CAPABILITIES) or {}).get(str(self._device_id), {})
+        return resolve(
+            CAP_HUMIDIFIER,
+            detected,
+            entry.options.get(CONF_HUMIDIFIER, DEFAULT_CAP_MODE),
+        )
 
     # ---------- HVAC ----------
 

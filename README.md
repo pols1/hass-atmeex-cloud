@@ -14,10 +14,11 @@ Atmeex Cloud REST API, built for current Home Assistant releases.
 *   Fan speed control (1–7).
 *   Operation modes: ventilation, recirculation, mixed, and fresh-air intake.
 *   Target temperature control (°C).
-*   Optional humidifier control (if supported by the device).
+*   Humidifier control on the trims that have one, detected automatically.
 *   **Climate Presets**: Support for Auto and Sleep modes.
 *   **Optional Cool Mode**: You can optionally enable cooling mode (`HVACMode.COOL`) from the integration settings if your climate complex supports it.
-*   **Sensors**: CO₂ (`co2_ppm`), indoor temperature and outdoor temperature.
+*   **Sensors**: indoor and outdoor temperature always; CO₂ and room humidity on the trims
+    that actually have those parts — the integration works out which (see Options).
 *   **Config Flow Re-authentication**: Seamlessly handles expired cloud tokens by prompting re-login natively in HA.
 *   Online/offline status displayed directly on the climate card.
 *   Clean asynchronous I/O using Home Assistant’s shared aiohttp client session.
@@ -55,10 +56,35 @@ into your Home Assistant configuration directory:
 The integration uses an internal update coordinator with a 30-second polling interval.
 
 ## Options
-You can configure the integration dynamically after setup:
-1. Go to Settings → Devices & Services → Atmeex Cloud.
-2. Click **Configure**.
-3. Toggle whether you want to expose the **CO2 Sensor** or enable **Cool Mode**.
+
+Settings → Devices & Services → Atmeex Cloud → **Configure**.
+
+### Which parts your unit actually has
+
+A7 ships in seven trims and they differ inside:
+
+| Trim | Humidifier | CO₂ sensor |
+|---|---|---|
+| Simple, Flow | — | — |
+| Start | yes | — |
+| BabyCare, Forever (3 colours) | yes | yes |
+
+Neither the cloud API nor the device's own greeting reports the trim — `model` is always
+`A7`. So the integration works it out from the readings, and **CO₂ sensor** and
+**Humidifier** default to *auto*:
+
+* **CO₂** — a missing sensor reports exactly `0 ppm` for ever. Air never does: outdoors is
+  around 420 ppm, indoors 500–1500. Measured on a live Start: 1952 telemetry frames, all
+  zero. So a persistent zero means there is no sensor, and no always-zero entity is created.
+* **Humidifier** — room humidity only arrives on units that have one. The presence of the
+  `hum_stg` field proves nothing: it is sent by trims that cannot humidify at all.
+
+Detection only ever adds a part, never takes one away, so a momentary zero from a failing
+sensor will not delete an entity together with its history. Set the option to *on* or *off*
+to override — for a faulty sensor, or a non-standard build.
+
+**Cool mode** stays manual: the A7 line does not cool, the option exists for other Atmeex
+climate units.
 
 ## Compatibility
 
@@ -81,9 +107,10 @@ Two platforms are loaded: `climate` and `sensor`.
 | Entity type | Example | Description |
 |---|---|---|
 | **climate** | `climate.brizer_bedroom` | Main entity: on/off, fan speed 1–7, target temperature, presets (Auto, Sleep), humidifier slider, optional Cool mode |
-| **sensor** | `sensor.brizer_bedroom_co2` | CO₂ level, ppm (can be disabled in options) |
 | **sensor** | `sensor.brizer_bedroom_indoor_temperature` | Room temperature |
 | **sensor** | `sensor.brizer_bedroom_outdoor_temperature` | Outdoor temperature |
+| **sensor** | `sensor.brizer_bedroom_co2` | CO₂ level, ppm — only on trims with the sensor |
+| **sensor** | `sensor.brizer_bedroom_humidity` | Room humidity, % — only on trims with the humidifier |
 
 Online/offline state is not a separate entity: it drives the `available` property of the
 climate entity, so an offline device greys out on the card.

@@ -31,16 +31,18 @@
       "init": {
         "title": "Atmeex Cloud options",
         "data": {
-          "enable_co2": "CO₂ sensor",
           "enable_cool": "Cool mode",
           "local_enabled": "Local channel",
-          "local_port": "Local channel port"
+          "local_port": "Local channel port",
+          "co2_sensor": "CO₂ sensor",
+          "humidifier": "Humidifier"
         },
         "data_description": {
-          "enable_co2": "Expose the CO₂ level as a separate sensor entity.",
           "enable_cool": "Offer HVAC cool mode — only for complexes that actually support cooling.",
           "local_enabled": "Accept direct connections from the brizers instead of relying only on cloud polling. Requires redirecting ws.iot.atmeex.com to this Home Assistant — see the README.",
-          "local_port": "Port Home Assistant listens on for brizer connections. The devices always dial 3001, so change it only if that port is taken and you remap it on the router."
+          "local_port": "Port Home Assistant listens on for brizer connections. The devices always dial 3001, so change it only if that port is taken and you remap it on the router.",
+          "co2_sensor": "Auto follows the readings: A7 only carries a CO₂ sensor in the higher trims, and a missing one always reports 0 ppm — air never does. Override if your unit's sensor is faulty or the detection got it wrong.",
+          "humidifier": "Auto follows the readings: room humidity only arrives on units that have the humidifier. Override to force the humidity slider on or off."
         }
       }
     }

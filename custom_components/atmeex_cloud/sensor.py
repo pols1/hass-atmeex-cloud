@@ -9,6 +9,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.const import (
+    PERCENTAGE,
     UnitOfRatio,
     UnitOfTemperature,
 )
@@ -17,7 +18,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 
-from .const import DOMAIN
+from .capabilities import CAP_CO2, CAP_HUMIDIFIER, resolve
+from .const import (
+    CONF_CO2_SENSOR,
+    CONF_HUMIDIFIER,
+    DATA_CAPABILITIES,
+    DEFAULT_CAP_MODE,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,11 +59,30 @@ async def async_setup_entry(
 
         name = dev.get("name") or f"Atmeex {did_int}"
 
-        enable_co2 = entry.options.get("enable_co2", True)
-
-        if enable_co2:
+        # Комплектация: у A7 семь модификаций, и датчик CO2 есть только
+        # у старших. Создавать сенсор, который вечно показывает ноль,
+        # смысла нет — см. capabilities.py.
+        detected = (entry.data.get(DATA_CAPABILITIES) or {}).get(str(did_int), {})
+        if resolve(
+            CAP_CO2,
+            detected,
+            entry.options.get(CONF_CO2_SENSOR, DEFAULT_CAP_MODE),
+        ):
             entities.append(
                 AtmeexCo2Sensor(
+                    coordinator=coordinator,
+                    device_id=did_int,
+                    device_name=name,
+                )
+            )
+
+        if resolve(
+            CAP_HUMIDIFIER,
+            detected,
+            entry.options.get(CONF_HUMIDIFIER, DEFAULT_CAP_MODE),
+        ):
+            entities.append(
+                AtmeexHumiditySensor(
                     coordinator=coordinator,
                     device_id=did_int,
                     device_name=name,
@@ -133,6 +160,22 @@ class AtmeexCo2Sensor(AtmeexBaseSensor):
     def native_value(self) -> int | None:
         val = self._state.get("co2_ppm")
         return int(val) if isinstance(val, (int, float)) else None
+
+class AtmeexHumiditySensor(AtmeexBaseSensor):
+    """Влажность в помещении. Приходит там, где есть увлажнитель."""
+
+    _attr_device_class = SensorDeviceClass.HUMIDITY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = PERCENTAGE
+
+    def __init__(self, coordinator, device_id: int, device_name: str) -> None:
+        super().__init__(coordinator, device_id, device_name, "hum_room", "Humidity")
+
+    @property
+    def native_value(self) -> int | None:
+        val = self._state.get("hum_room")
+        return int(val) if isinstance(val, (int, float)) else None
+
 
 class AtmeexTempInSensor(AtmeexBaseSensor):
     _attr_device_class = SensorDeviceClass.TEMPERATURE

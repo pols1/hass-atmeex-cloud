@@ -7,6 +7,16 @@ versioning follows [Semantic Versioning](https://semver.org/).
 ## [0.6.0] — unreleased
 
 ### Added
+- **Per-unit feature detection.** A7 ships in seven trims — Simple and Flow have neither
+  humidifier nor CO₂ sensor, Start has the humidifier only, BabyCare and Forever have both —
+  and the API never says which one you own (`model` is always `A7`). The integration now
+  derives it from the readings: a missing CO₂ sensor reports exactly 0 ppm for ever, which
+  air never does, and room humidity only arrives on units that actually humidify. So an
+  always-zero CO₂ entity is no longer created on units without the sensor, and the humidity
+  slider no longer appears where there is nothing to humidify. `CO₂ sensor` and `Humidifier`
+  options are tri-state: auto (default), on, off.
+- **Room humidity sensor**, created on units that have the humidifier. The field was in the
+  cloud API all along but no entity was ever made for it.
 - **Local channel (read-only).** Home Assistant can accept the brizers' own outbound
   connection and read their live stream, while forwarding it unchanged to the Atmeex
   cloud so the vendor app keeps working. Entities then update every few seconds instead
@@ -16,6 +26,12 @@ versioning follows [Semantic Versioning](https://semver.org/).
   is not implemented yet — control still goes through the cloud API.
 - First tests in the repository: `tests/test_local_channel.py`, running on plain Python
   (no Home Assistant needed) against real captured frames, wired into CI.
+
+### Changed
+- The `enable_co2` option is replaced by tri-state `co2_sensor`. It used to default to on,
+  which created a CO₂ entity stuck at zero on every unit without the sensor.
+- `climate` no longer concludes that a humidifier exists just because a `hum_stg` key is
+  present in the payload — that key arrives from trims without a humidifier too.
 
 ### Protocol notes
 The device channel is plain JSON over TCP on port 3001, without TLS. Objects arrive
