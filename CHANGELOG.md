@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] — unreleased
+
+### Added
+- **Local channel (read-only).** Home Assistant can accept the brizers' own outbound
+  connection and read their live stream, while forwarding it unchanged to the Atmeex
+  cloud so the vendor app keeps working. Entities then update every few seconds instead
+  of waiting for the 30-second cloud poll, and the stream carries room humidity and the
+  humidifier water-tank flag. Off by default; enable it in the integration options and
+  redirect `ws.iot.atmeex.com` to Home Assistant (see README). Writing commands locally
+  is not implemented yet — control still goes through the cloud API.
+- First tests in the repository: `tests/test_local_channel.py`, running on plain Python
+  (no Home Assistant needed) against real captured frames, wired into CI.
+
+### Protocol notes
+The device channel is plain JSON over TCP on port 3001, without TLS. Objects arrive
+concatenated with no delimiter and no length prefix. The device stays silent until the
+server answers its `hello` with a time sync — that is why a naive echo of its own
+settings gets no response. Commands are `{"id":"<MAC>:0","cmd":{"set_…": value}}`.
+
 ## [0.5.10] — unreleased
 
 Compatibility fixes for Home Assistant 2026.x, and a move to this repository.

@@ -14,7 +14,15 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import AtmeexApi, ApiAuthError, ApiError
-from .const import DOMAIN, PLATFORMS
+from .const import (
+    CONF_LOCAL_ENABLED,
+    CONF_LOCAL_PORT,
+    DEFAULT_LOCAL_ENABLED,
+    DEFAULT_LOCAL_PORT,
+    DOMAIN,
+    PLATFORMS,
+)
+from .local_channel import AtmeexLocalChannel, normalize_mac
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -110,6 +118,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "refresh_device": refresh_device,  # <-- ВОТ ЭТОГО НЕ ХВАТАЛО
     }
 
+    local = await _async_setup_local_channel(hass, entry, coordinator)
+    if local is not None:
+        hass.data[DOMAIN][entry.entry_id]["local"] = local
+
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -119,6 +131,89 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         email,
     )
     return True
+
+
+async def _async_setup_local_channel(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: DataUpdateCoordinator,
+) -> AtmeexLocalChannel | None:
+    """Поднять локальный канал, если он включён в настройках интеграции.
+
+    Бризер не слушает портов и только звонит в облако, поэтому канал — это
+    приёмная сторона его соединения; трафик заворачивается на Home Assistant
+    статической DNS-записью или правилом на роутере (см. README).
+    """
+    if not entry.options.get(CONF_LOCAL_ENABLED, DEFAULT_LOCAL_ENABLED):
+        return None
+
+    port = int(entry.options.get(CONF_LOCAL_PORT, DEFAULT_LOCAL_PORT))
+
+    def _merge(mac: str, key: str, payload: dict[str, Any]) -> None:
+        """Влить локальный кадр в данные координатора и обновить сущности.
+
+        Имена полей локального протокола совпадают с облачными: state ложится
+        в condition, setp — в settings, поэтому трансляция не нужна.
+        """
+        data = coordinator.data
+        if not isinstance(data, dict):
+            return
+
+        devices = data.get("devices") or []
+        target = next(
+            (
+                dev
+                for dev in devices
+                if isinstance(dev, dict) and normalize_mac(dev.get("mac") or "") == mac
+            ),
+            None,
+        )
+        if target is None:
+            _LOGGER.debug(
+                "Atmeex: локальный кадр от %s, но такого MAC нет среди устройств "
+                "аккаунта — игнорирую",
+                mac,
+            )
+            return
+
+        did = str(target.get("id"))
+        new_devices = []
+        for dev in devices:
+            if dev is target:
+                dev = {**dev, "online": True}
+                if key == "setp":
+                    dev["settings"] = {**(dev.get("settings") or {}), **payload}
+                else:
+                    dev["condition"] = {**(dev.get("condition") or {}), **payload}
+            new_devices.append(dev)
+
+        states = dict(data.get("states") or {})
+        if key == "state":
+            states[did] = {**(states.get(did) or {}), **payload}
+
+        coordinator.async_set_updated_data(
+            {**data, "devices": new_devices, "states": states}
+        )
+
+    channel = AtmeexLocalChannel(
+        port=port,
+        on_state=lambda mac, payload: _merge(mac, "state", payload),
+        on_setp=lambda mac, payload: _merge(mac, "setp", payload),
+    )
+
+    try:
+        await channel.async_start()
+    except OSError as err:
+        _LOGGER.error(
+            "Atmeex: не удалось занять порт %s для локального канала (%s). "
+            "Локальный режим выключен, интеграция работает через облако",
+            port,
+            err,
+        )
+        return None
+
+    entry.async_on_unload(channel.async_stop)
+    return channel
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

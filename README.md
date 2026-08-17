@@ -92,6 +92,51 @@ climate entity, so an offline device greys out on the card.
 `const.py` currently lists only `CLIMATE` and `SENSOR`. Enable them there if you want the
 damper position and humidification stage as standalone entities.
 
+## Local channel (experimental, read-only for now)
+
+The brizers do not listen on any port — verified by a full TCP scan (1–10000, every port
+`closed`) and UDP probing. They are pure outbound clients: each opens one TCP connection to
+`ws.iot.atmeex.com:3001` and talks plain JSON over it, with no TLS. So local access means
+being on the receiving end of that connection, not connecting to the device.
+
+With **Local channel** enabled, Home Assistant listens on port 3001 and **forwards
+everything to the Atmeex cloud unchanged** — the vendor app keeps working, and the
+integration additionally reads the live stream. That stream carries a `state` frame every
+few seconds, so entities update in near real time instead of waiting for the 30-second
+cloud poll, and it exposes room humidity and the humidifier's water-tank flag.
+
+If the cloud is unreachable, the channel answers the device itself (the device stays silent
+until the server acknowledges its `hello` with a time sync), so local readings survive a
+vendor outage.
+
+### Redirecting the traffic
+
+The integration cannot redirect traffic to itself — that is a network change you make once:
+
+* **DNS override (simplest):** point `ws.iot.atmeex.com` at your Home Assistant IP on your
+  router, Pi-hole or AdGuard Home.
+* **Or per-device NAT**, if you would rather not touch DNS for the whole network. On
+  MikroTik, for one brizer:
+
+  ```
+  /ip firewall nat add chain=dstnat protocol=tcp src-address=<brizer IP> \
+      dst-address=<cloud IP> dst-port=3001 \
+      action=dst-nat to-addresses=<HA IP> to-ports=3001 place-before=0
+  /ip firewall nat add chain=srcnat protocol=tcp src-address=<brizer IP> \
+      dst-address=<HA IP> dst-port=3001 action=masquerade place-before=0
+  ```
+
+  The second rule is required when the brizer and Home Assistant share a bridge: without
+  it the reply comes from the wrong source address and the device drops the session.
+
+**Add a failsafe.** While the redirect is in place, a Home Assistant outage cuts the
+brizers off from the cloud as well. On MikroTik, `/tool netwatch` can watch the port and
+disable the rule when Home Assistant stops answering, so the devices fall back to the
+vendor on their own.
+
+A power cycle of the brizer is the reliable way to make it reconnect through the new path —
+clearing connection tracking on the router does not close the socket on the device.
+
 ## Humidifier Control
 
 If your device supports a humidifier, a humidity slider will appear under the climate card.
@@ -129,17 +174,19 @@ Settings → System → Logs → custom_components.atmeex_cloud
 
 All requests use Home Assistant’s shared async session (async_get_clientsession(hass)), ensuring clean resource management and no unclosed sessions.
 
-### Test environment (planned)
+### Tests
 
-There is **no test suite in this repository yet** — an earlier version of this README
-described one that was never committed. The intended setup, once it lands:
+The local-channel tests need no Home Assistant install — `local_channel.py` deliberately
+depends on nothing but the standard library, and the fixtures are real frames captured
+from an A7:
 
-* `pytest`, `pytest-asyncio` and `pytest-homeassistant-custom-component` in a virtualenv,
-  pinned in a `requirements-dev.txt`;
-* tests under `tests/` covering `api.py`, coordinator setup in `__init__.py`, the climate
-  entity, and the config flow.
+```
+python3 -m unittest discover -s tests -v
+```
 
-Until then, changes are verified against a live Home Assistant instance.
+They run in CI on every push. Everything else (cloud API, entities, config flow) is still
+verified against a live Home Assistant instance; `pytest-homeassistant-custom-component`
+coverage for those parts is not written yet.
 
 ### Releasing a new version
 1. Update the `version` field in `manifest.json`.

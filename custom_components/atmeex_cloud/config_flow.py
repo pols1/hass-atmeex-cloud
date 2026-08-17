@@ -11,7 +11,13 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN
+from .const import (
+    CONF_LOCAL_ENABLED,
+    CONF_LOCAL_PORT,
+    DEFAULT_LOCAL_ENABLED,
+    DEFAULT_LOCAL_PORT,
+    DOMAIN,
+)
 from .api import AtmeexApi, ApiError
 
 _LOGGER = logging.getLogger(__name__)
@@ -166,6 +172,16 @@ class AtmeexOptionsFlowHandler(config_entries.OptionsFlow):
                         "enable_cool",
                         default=options.get("enable_cool", False),
                     ): bool,
+                    vol.Optional(
+                        CONF_LOCAL_ENABLED,
+                        default=options.get(
+                            CONF_LOCAL_ENABLED, DEFAULT_LOCAL_ENABLED
+                        ),
+                    ): bool,
+                    vol.Optional(
+                        CONF_LOCAL_PORT,
+                        default=options.get(CONF_LOCAL_PORT, DEFAULT_LOCAL_PORT),
+                    ): vol.All(int, vol.Range(min=1, max=65535)),
                 }
             ),
         )
