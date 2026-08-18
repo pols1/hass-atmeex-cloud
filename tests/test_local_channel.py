@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib.util
 import json
 import pathlib
@@ -267,3 +268,106 @@ class TestCapabilityDetection(unittest.TestCase):
             self.caps.resolve(self.caps.CAP_CO2, {"co2": True}, self.caps.MODE_AUTO)
         )
         self.assertFalse(self.caps.resolve(self.caps.CAP_CO2, {}, self.caps.MODE_AUTO))
+
+
+def _load(name: str):
+    import importlib.util
+
+    path = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "custom_components"
+        / "atmeex_cloud"
+        / f"{name}.py"
+    )
+    spec = importlib.util.spec_from_file_location(f"atmeex_{name}", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestPayloadDiffers(unittest.TestCase):
+    """Устройство шлёт state каждые ~5 с; публиковать неизменное незачем."""
+
+    def setUp(self):
+        self.dm = _load("data_merge")
+        self.data = {
+            "devices": [{"id": 17428, "settings": {"u_fan_speed": 2}}],
+            "states": {"17428": {"temp_room": 164, "pwr_on": True, "time": "20:25:39"}},
+        }
+
+    def test_same_values_with_new_timestamp_are_not_a_change(self):
+        frame = {"temp_room": 164, "pwr_on": True, "time": "20:25:44"}
+        self.assertFalse(self.dm.payload_differs(self.data, "state", "17428", frame))
+
+    def test_real_change_is_detected(self):
+        frame = {"temp_room": 165, "pwr_on": True, "time": "20:25:44"}
+        self.assertTrue(self.dm.payload_differs(self.data, "state", "17428", frame))
+
+    def test_new_field_is_a_change(self):
+        self.assertTrue(
+            self.dm.payload_differs(self.data, "state", "17428", {"hum_room": 66})
+        )
+
+    def test_settings_are_compared_against_the_device(self):
+        self.assertFalse(
+            self.dm.payload_differs(self.data, "setp", "17428", {"u_fan_speed": 2})
+        )
+        self.assertTrue(
+            self.dm.payload_differs(self.data, "setp", "17428", {"u_fan_speed": 3})
+        )
+
+    def test_unknown_device_counts_as_change(self):
+        self.assertTrue(
+            self.dm.payload_differs(self.data, "state", "99999", {"temp_room": 164})
+        )
+
+
+class TestStandaloneRecovery(unittest.IsolatedAsyncioTestCase):
+    """Аварийный режим обязан быть временным.
+
+    Бризер держит соединение сутками. Если облако легло в момент его
+    подключения, а мы навсегда остались отвечать сами, устройство исчезает
+    из приложения вендора до следующего передёрга питания — что и случилось
+    18.08.2026 на живой гостиной.
+    """
+
+    PORT = 13902
+    UPSTREAM_PORT = 13903
+
+    async def test_session_is_dropped_when_cloud_returns(self):
+        _mod.UPSTREAM_RETRY_INTERVAL = 0.2  # не ждать минуту в тесте
+        self.addCleanup(setattr, _mod, "UPSTREAM_RETRY_INTERVAL", 60)
+
+        channel = AtmeexLocalChannel(
+            port=self.PORT, upstream=("127.0.0.1", self.UPSTREAM_PORT)
+        )
+        await channel.async_start()
+        self.addCleanup(lambda: asyncio.ensure_future(channel.async_stop()))
+
+        # Облако лежит: апстрим не слушает, канал должен обслужить сам.
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.PORT)
+        writer.write(HELLO.encode())
+        await writer.drain()
+
+        acc, frames = "", []
+        while len(frames) < 1:
+            acc += (await asyncio.wait_for(reader.read(4096), timeout=5)).decode()
+            frames, _ = split_json_objects(acc)
+        self.assertIs(json.loads(frames[0]).get("hello"), True, "канал не ответил сам")
+
+        # Облако вернулось.
+        async def accept(r, w):
+            w.close()
+
+        cloud = await asyncio.start_server(accept, "127.0.0.1", self.UPSTREAM_PORT)
+        self.addCleanup(cloud.close)
+
+        # Сессию должны разорвать, чтобы бризер переподключился уже через облако.
+        for _ in range(100):
+            if reader.at_eof():
+                break
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(reader.read(1), timeout=0.1)
+        self.assertTrue(
+            reader.at_eof(), "автономная сессия не разорвана после возвращения облака"
+        )

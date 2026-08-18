@@ -45,6 +45,10 @@ UPSTREAM_PORT = 3001
 
 UPSTREAM_CONNECT_TIMEOUT = 10
 STOP_TIMEOUT = 5
+# Как часто проверять, не поднялось ли облако, пока мы обслуживаем
+# устройство автономно. Бризер держит соединение сутками, поэтому без
+# этой проверки авария у вендора превращалась бы в вечную изоляцию.
+UPSTREAM_RETRY_INTERVAL = 60
 # Опора для ресинхронизации потока: кадры устройства всегда начинаются с
 # {"id", ответы облака — с {"hello" (синхронизация времени) либо тоже с {"id".
 FRAME_PREFIXES = ('{"id"', '{"hello"')
@@ -214,6 +218,11 @@ class AtmeexLocalChannel:
             relay = asyncio.create_task(self._relay_upstream(up_reader, writer))
             self._tasks.add(relay)
             relay.add_done_callback(self._tasks.discard)
+        elif self._upstream is not None:
+            # Обслуживаем устройство сами, но ждём возвращения облака.
+            relay = asyncio.create_task(self._await_upstream_return(writer))
+            self._tasks.add(relay)
+            relay.add_done_callback(self._tasks.discard)
 
         buf = ""
         try:
@@ -277,6 +286,34 @@ class AtmeexLocalChannel:
                 err,
             )
             return None, None
+
+    async def _await_upstream_return(self, writer: asyncio.StreamWriter) -> None:
+        """Ждать, пока облако оживёт, и разорвать автономную сессию.
+
+        Подхватить облако на середине разговора нельзя: оно не видело hello
+        и не знает, чьё это соединение. Поэтому, когда вендор возвращается,
+        мы закрываем сессию — бризер переподключается за секунды и получает
+        уже нормальный сквозной канал.
+        """
+        while True:
+            await asyncio.sleep(UPSTREAM_RETRY_INTERVAL)
+            if writer.is_closing():
+                return
+            try:
+                async with asyncio.timeout(UPSTREAM_CONNECT_TIMEOUT):
+                    _, probe = await asyncio.open_connection(*self._upstream)
+            except (OSError, TimeoutError):
+                continue
+
+            probe.close()
+            with contextlib.suppress(Exception):
+                await probe.wait_closed()
+            _LOGGER.info(
+                "Atmeex: облако снова доступно — разрываю автономную сессию, "
+                "устройство переподключится уже через облако"
+            )
+            writer.close()
+            return
 
     async def _relay_upstream(
         self, up_reader: asyncio.StreamReader, writer: asyncio.StreamWriter

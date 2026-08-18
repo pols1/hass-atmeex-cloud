@@ -24,6 +24,7 @@ from .const import (
     DOMAIN,
     PLATFORMS,
 )
+from .data_merge import payload_differs
 from .local_channel import AtmeexLocalChannel, normalize_mac
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,6 +63,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         token_update_cb=_save_tokens,
     )
 
+    # Канал создаётся после координатора, поэтому ссылку кладём в держатель:
+    # опрос облака должен знать, кто прямо сейчас говорит с нами локально.
+    local_holder: dict[str, Any] = {}
+
     async def async_update_data() -> dict[str, Any]:
         try:
             devices = await api.get_devices(with_condition=True)
@@ -89,6 +94,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 cond = dev.get("condition")
                 if did is not None and isinstance(cond, dict):
                     states[str(did)] = cond
+
+        channel = local_holder.get("channel")
+        if channel is not None:
+            # Устройство, которое прямо сейчас держит с нами соединение,
+            # офлайном быть не может — что бы ни думало облако. Без этого
+            # доступность мигала: локальный кадр поднимал сущность, опрос
+            # облака ронял её, и триггеры «вернулся из unavailable»
+            # срабатывали по кругу, отправляя команды вендору.
+            for dev in devices:
+                if not isinstance(dev, dict):
+                    continue
+                mac = normalize_mac(dev.get("mac") or "")
+                if mac and channel.connected.get(mac):
+                    if not dev.get("online"):
+                        _LOGGER.debug(
+                            "Atmeex: облако считает %s офлайном, но устройство "
+                            "на связи по локальному каналу — доверяю каналу",
+                            dev.get("id"),
+                        )
+                    dev["online"] = True
+                    local_state = channel.states.get(mac)
+                    if local_state:
+                        did = str(dev.get("id"))
+                        states[did] = {**(states.get(did) or {}), **local_state}
+                        dev["condition"] = {**(dev.get("condition") or {}), **local_state}
 
         _LOGGER.debug(
             "Atmeex: coordinator devices = %s",
@@ -124,6 +154,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     local = await _async_setup_local_channel(hass, entry, coordinator)
     if local is not None:
         hass.data[DOMAIN][entry.entry_id]["local"] = local
+        local_holder["channel"] = local
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
@@ -232,6 +263,11 @@ async def _async_setup_local_channel(
         states = dict(data.get("states") or {})
         if key == "state":
             states[did] = {**(states.get(did) or {}), **payload}
+
+        # Устройство шлёт состояние каждые несколько секунд, и чаще всего
+        # оно не меняется — только метка времени. Публиковать такое незачем.
+        if not payload_differs(data, key, did, payload):
+            return
 
         coordinator.async_set_updated_data(
             {**data, "devices": new_devices, "states": states}
