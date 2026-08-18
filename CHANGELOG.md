@@ -33,6 +33,20 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `climate` no longer concludes that a humidifier exists just because a `hum_stg` key is
   present in the payload — that key arrives from trims without a humidifier too.
 
+### Fixed
+- **The standalone fallback could strand a device.** If the cloud was unreachable when a
+  brizer connected, the channel answered it itself — and never retried the upstream. Since
+  a brizer holds one connection for days, the device stayed invisible to the vendor cloud
+  long after the outage ended: a day and a half, on the install this was found on. The
+  upstream is now probed once a minute and the session dropped when the cloud returns, so
+  the device reconnects through a proxied one.
+- **Availability flapped between local and cloud data**, because the cloud marks a device
+  offline while it has no telemetry for it. Any automation triggering on "came back from
+  unavailable" then fired every few seconds. A device holding a live local connection is
+  now treated as online regardless of what the cloud reports.
+- Identical telemetry frames no longer publish a coordinator update; only the timestamp
+  usually differs between them.
+
 ### Protocol notes
 The device channel is plain JSON over TCP on port 3001, without TLS. Objects arrive
 concatenated with no delimiter and no length prefix. The device stays silent until the

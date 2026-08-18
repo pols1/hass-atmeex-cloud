@@ -138,31 +138,44 @@ vendor outage.
 
 ### Redirecting the traffic
 
-The integration cannot redirect traffic to itself — that is a network change you make once:
+The integration cannot redirect traffic to itself — that is a network change you make once.
+Point the device channel's hostname at Home Assistant and add a failsafe:
 
-* **DNS override (simplest):** point `ws.iot.atmeex.com` at your Home Assistant IP on your
-  router, Pi-hole or AdGuard Home.
-* **Or per-device NAT**, if you would rather not touch DNS for the whole network. On
-  MikroTik, for one brizer:
+```
+# 1) Send the device channel to Home Assistant
+/ip dns static add name=ws.iot.atmeex.com address=<HA_IP> ttl=1m \
+    comment="atmeex-local ws->HA (netwatch)"
 
-  ```
-  /ip firewall nat add chain=dstnat protocol=tcp src-address=<brizer IP> \
-      dst-address=<cloud IP> dst-port=3001 \
-      action=dst-nat to-addresses=<HA IP> to-ports=3001 place-before=0
-  /ip firewall nat add chain=srcnat protocol=tcp src-address=<brizer IP> \
-      dst-address=<HA IP> dst-port=3001 action=masquerade place-before=0
-  ```
+# 2) Failsafe: watch the local channel port on Home Assistant.
+#    Port alive -> the record stays enabled and the brizers talk to HA.
+#    Port gone (restart, update, crash) -> the record is disabled and flushed,
+#    so the brizers fall back to the vendor cloud on their own.
+/tool netwatch add name=atmeex-ha-guard type=tcp-conn host=<HA_IP> port=3001 \
+    interval=30s timeout=3s \
+    up-script="/ip dns static enable [find name=\"ws.iot.atmeex.com\"]\r\n/ip dns cache flush" \
+    down-script="/ip dns static disable [find name=\"ws.iot.atmeex.com\"]\r\n/ip dns cache flush"
+```
 
-  The second rule is required when the brizer and Home Assistant share a bridge: without
-  it the reply comes from the wrong source address and the device drops the session.
+**The failsafe is not optional.** While the name points at Home Assistant, any downtime —
+a restart, an update, a crash — cuts the brizers off from the cloud as well, and they stay
+cut off for as long as they hold the connection, which is days. That is not theory: it
+happened here for a day and a half before the guard existed.
 
-**Add a failsafe.** While the redirect is in place, a Home Assistant outage cuts the
-brizers off from the cloud as well. On MikroTik, `/tool netwatch` can watch the port and
-disable the rule when Home Assistant stops answering, so the devices fall back to the
-vendor on their own.
+Verify it by stopping the listener: within ~30 s netwatch goes down, the record is
+disabled, and `ws.iot.atmeex.com` resolves to the vendor again.
 
-A power cycle of the brizer is the reliable way to make it reconnect through the new path —
-clearing connection tracking on the router does not close the socket on the device.
+Any router, Pi-hole or AdGuard Home will do for the DNS half; the example above is
+MikroTik because that is where it was built and tested.
+
+### What to expect during the switch
+
+* A DNS override cannot be selective — it moves **every** brizer on the network.
+* Devices switch on their next reconnect, not immediately: each holds a single connection
+  for days. Removing an old NAT redirect does not break the existing session either,
+  because connection tracking keeps the mapping. A power cycle forces the switch if you
+  want it now; otherwise just wait.
+* While the redirect is in place the vendor still sees the devices online — Home Assistant
+  forwards their traffic unchanged.
 
 ## Humidifier Control
 
