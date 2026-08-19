@@ -1,5 +1,7 @@
 # Atmeex Cloud Integration for Home Assistant
 
+*[Русская версия](README.ru.md)*
+
 ## Overview
 
 Atmeex Cloud is a custom integration for [Home Assistant](https://www.home-assistant.io/) that connects your Atmeex (AirNanny) ventilation devices to the Home Assistant ecosystem.
@@ -86,6 +88,17 @@ to override — for a faulty sensor, or a non-standard build.
 **Cool mode** stays manual: the A7 line does not cool, the option exists for other Atmeex
 climate units.
 
+### Command path
+
+* `cloud_first` (default) — commands go through the cloud, falling back to the local channel
+  when the cloud refuses them and the device is connected locally.
+* `local_first` — straight to the device, using the cloud only when the device is not
+  connected to Home Assistant.
+* `cloud_only` — the local channel is never used for writing.
+
+Cloud-first is the default for consistency rather than reliability: the vendor app reads
+state from the cloud, so writing past it would let the two views drift apart.
+
 ## Compatibility
 
 Tested against **Home Assistant 2026.8** (Python 3.14, Home Assistant OS); `hacs.json`
@@ -119,7 +132,7 @@ climate entity, so an offline device greys out on the card.
 `const.py` currently lists only `CLIMATE` and `SENSOR`. Enable them there if you want the
 damper position and humidification stage as standalone entities.
 
-## Local channel (experimental, read-only for now)
+## Local channel
 
 The brizers do not listen on any port — verified by a full TCP scan (1–10000, every port
 `closed`) and UDP probing. They are pure outbound clients: each opens one TCP connection to
@@ -132,9 +145,15 @@ integration additionally reads the live stream. That stream carries a `state` fr
 few seconds, so entities update in near real time instead of waiting for the 30-second
 cloud poll, and it exposes room humidity and the humidifier's water-tank flag.
 
-If the cloud is unreachable, the channel answers the device itself (the device stays silent
-until the server acknowledges its `hello` with a time sync), so local readings survive a
-vendor outage.
+If the cloud is unreachable, the channel answers the device itself — the device stays silent
+until the server acknowledges its `hello` with a time sync — so readings keep coming through
+a vendor outage. Once the cloud returns, the session is dropped so the device reconnects
+through a proxied one.
+
+Commands can also travel this way; see **Command path** under Options. Only `set_pwr_on`,
+`set_fan_speed` and `set_cool_mode` were observed on the wire during the capture — the names
+for damper, temperature and humidity stage are inferred from the setpoint fields and are
+marked as such in the code.
 
 ### Redirecting the traffic
 
@@ -176,6 +195,14 @@ MikroTik because that is where it was built and tested.
   want it now; otherwise just wait.
 * While the redirect is in place the vendor still sees the devices online — Home Assistant
   forwards their traffic unchanged.
+* The override also applies to Home Assistant itself, so the integration resolves the cloud
+  address via the REST API hostname and refuses connections arriving from its own outbound
+  socket. Without that the channel would connect to itself, treat the result as a new
+  device, and open another upstream for it — endlessly.
+
+A normal Home Assistant restart usually does **not** trip the failsafe: the port is down for
+about thirty seconds and netwatch polls every thirty. That is the intended behaviour — no
+needless flapping. It guards against longer outages.
 
 ## Humidifier Control
 
