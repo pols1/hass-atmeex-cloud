@@ -160,6 +160,15 @@ marked as such in the code.
 The integration cannot redirect traffic to itself — that is a network change you make once.
 Point the device channel's hostname at Home Assistant and add a failsafe:
 
+> **Which redirect actually works depends on the device.** A DNS override only reaches
+> devices that use the DNS server handed out by DHCP. On the install this was developed
+> against, the brizers were never observed asking the router for `ws.iot.atmeex.com` — every
+> successful local connection came from the NAT rule, which matches by address and does not
+> care how the device resolves names. Try the DNS route first because it is simpler, but if
+> the device keeps going straight to the vendor after a power cycle, use the NAT rule (or
+> force DNS traffic to your router).
+
+
 ```
 # 1) Send the device channel to Home Assistant
 /ip dns static add name=ws.iot.atmeex.com address=<HA_IP> ttl=1m \
@@ -174,6 +183,12 @@ Point the device channel's hostname at Home Assistant and add a failsafe:
     up-script="/ip dns static enable [find name=\"ws.iot.atmeex.com\"]\r\n/ip dns cache flush" \
     down-script="/ip dns static disable [find name=\"ws.iot.atmeex.com\"]\r\n/ip dns cache flush"
 ```
+
+**Keep the probe cheap.** The guard opens a TCP connection to the local channel every
+thirty seconds. If answering that probe makes Home Assistant do real work — as it did while
+the channel connected to the cloud on every inbound socket — the probe can outlast its own
+timeout, and the guard will declare a healthy service dead and pull the DNS record. A watchman
+who makes the owner run to the cellar on every knock eventually decides nobody is home.
 
 **The failsafe is not optional.** While the name points at Home Assistant, any downtime —
 a restart, an update, a crash — cuts the brizers off from the cloud as well, and they stay
