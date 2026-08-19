@@ -513,3 +513,64 @@ class TestCommanderPolicy(unittest.IsolatedAsyncioTestCase):
         c = self._commander(self.FakeApi(), self.FakeChannel(), "cloud_first")
         await c.set_target_temperature(17428, 18.0)
         self.assertEqual(self.api_calls[-1][1], {"u_temp_room": 180})
+
+
+class TestSelfConnectionGuard(unittest.IsolatedAsyncioTestCase):
+    """Подмена DNS действует и на сам Home Assistant.
+
+    Если резолвить имя облака в лоб, канал соединяется сам с собой, принимает
+    это за новое устройство и открывает ещё одно встречное — рекурсия без дна.
+    Это случилось на живом доме 19.08.2026: сотни соединений в секунду.
+    """
+
+    PORT = 13904
+
+    async def test_own_upstream_connection_is_rejected(self):
+        channel = AtmeexLocalChannel(
+            port=self.PORT, upstream=("127.0.0.1", self.PORT)  # облако = мы сами
+        )
+        await channel.async_start()
+        self.addCleanup(lambda: asyncio.ensure_future(channel.async_stop()))
+
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.PORT)
+        self.addCleanup(writer.close)
+        writer.write(HELLO.encode())
+        await writer.drain()
+
+        # Канал открыл встречное «в облако» — то есть к себе же. Оно должно
+        # быть распознано и закрыто, а не обслужено как новое устройство.
+        for _ in range(100):
+            await asyncio.sleep(0.02)
+            if channel._own_endpoints:
+                break
+
+        await asyncio.sleep(0.3)
+        # Ровно одно настоящее устройство, никакой лавины.
+        self.assertLessEqual(
+            len(channel._writers), 2, "соединения размножаются — защита не сработала"
+        )
+
+    async def test_poisoned_name_falls_back_to_the_api_hostname(self):
+        """Когда имя канала указывает на нас, берём адрес по имени REST-API."""
+        channel = AtmeexLocalChannel(port=self.PORT)
+        own = channel._local_addresses()
+        self.assertIn("127.0.0.1", own, "свои адреса должны определяться")
+
+        async def fake_getaddrinfo(host, port, **kwargs):
+            # имитируем отравленный резолв: имя ведёт на нас же
+            return [(None, None, None, None, ("127.0.0.1", port))]
+
+        loop = asyncio.get_running_loop()
+        original = loop.getaddrinfo
+        loop.getaddrinfo = fake_getaddrinfo
+        try:
+            host, port = await channel._resolve_upstream()
+        finally:
+            loop.getaddrinfo = original
+
+        self.assertEqual(host, _mod.UPSTREAM_FALLBACK_HOST)
+        self.assertEqual(port, _mod.UPSTREAM_PORT)
+
+    async def test_explicit_address_is_trusted_as_is(self):
+        channel = AtmeexLocalChannel(port=self.PORT, upstream=("10.9.9.9", 3001))
+        self.assertEqual(await channel._resolve_upstream(), ("10.9.9.9", 3001))

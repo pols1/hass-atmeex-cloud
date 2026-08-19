@@ -34,6 +34,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import socket
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -42,6 +43,10 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_LOCAL_PORT = 3001
 UPSTREAM_HOST = "ws.iot.atmeex.com"
 UPSTREAM_PORT = 3001
+# Имя канала устройств заворачивается на Home Assistant — и оверрайд DNS
+# действует на всех клиентов, включая сам Home Assistant. Поэтому адрес
+# облака берём по имени REST-API: тот же сервер вендора, но не подменён.
+UPSTREAM_FALLBACK_HOST = "api.iot.atmeex.com"
 
 UPSTREAM_CONNECT_TIMEOUT = 10
 STOP_TIMEOUT = 5
@@ -169,6 +174,9 @@ class AtmeexLocalChannel:
         # с Python 3.12 Server.wait_closed() ждёт завершения ВСЕХ обработчиков,
         # а бризер держит соединение бесконечно — выгрузка интеграции повисла бы.
         self._writers: set[asyncio.StreamWriter] = set()
+        # Адреса наших собственных исходящих сокетов к облаку: по ним узнаём
+        # себя, если имя облака заворачивается на нас же.
+        self._own_endpoints: set[tuple[str, int]] = set()
         # Кому писать команды: mac -> (соединение, id устройства с суффиксом ':0')
         self._sessions: dict[str, tuple[asyncio.StreamWriter, str]] = {}
 
@@ -224,6 +232,16 @@ class AtmeexLocalChannel:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         peer = writer.get_extra_info("peername")
+        if isinstance(peer, tuple) and tuple(peer[:2]) in self._own_endpoints:
+            # Наше же встречное соединение вернулось к нам: имя облака ведёт
+            # на Home Assistant. Обслуживать его нельзя — будет рекурсия.
+            _LOGGER.error(
+                "Atmeex: локальный канал соединился сам с собой (%s). Адрес "
+                "облака указывает на Home Assistant — проверьте подмену DNS",
+                peer,
+            )
+            writer.close()
+            return
         _LOGGER.debug("Atmeex: подключилось устройство %s", peer)
         self._writers.add(writer)
 
@@ -280,6 +298,10 @@ class AtmeexLocalChannel:
             self._writers.discard(writer)
             if relay is not None:
                 relay.cancel()
+            if up_writer is not None:
+                sock = up_writer.get_extra_info("sockname")
+                if isinstance(sock, tuple) and len(sock) >= 2:
+                    self._own_endpoints.discard((sock[0], sock[1]))
             for w in (up_writer, writer):
                 if w is not None:
                     w.close()
@@ -293,18 +315,76 @@ class AtmeexLocalChannel:
         """Встречное соединение к облаку. None — работаем автономно."""
         if self._upstream is None:
             return None, None
+
+        host, port = await self._resolve_upstream()
         try:
             async with asyncio.timeout(UPSTREAM_CONNECT_TIMEOUT):
-                return await asyncio.open_connection(*self._upstream)
+                reader, writer = await asyncio.open_connection(host, port)
         except (OSError, TimeoutError) as err:
             _LOGGER.warning(
                 "Atmeex: облако %s:%s недоступно (%s) — локальный канал "
                 "отвечает устройству сам",
-                self._upstream[0],
-                self._upstream[1],
+                host,
+                port,
                 err,
             )
             return None, None
+
+        # Запоминаем свой конец: если это соединение вернётся к нам входящим,
+        # значит имя облака указывает на нас же.
+        sock = writer.get_extra_info("sockname")
+        if isinstance(sock, tuple) and len(sock) >= 2:
+            self._own_endpoints.add((sock[0], sock[1]))
+        return reader, writer
+
+    async def _resolve_upstream(self) -> tuple[str, int]:
+        """Куда идти за облаком.
+
+        Если резолвить имя канала устройств в лоб, канал соединится сам с
+        собой: подмена DNS действует и на Home Assistant. Каждое такое
+        соединение выглядит как новое устройство, для которого снова
+        открывается встречное — рекурсия без дна.
+        """
+        host, port = self._upstream
+        if host != UPSTREAM_HOST:
+            return host, port  # адрес задан явно — доверяем
+
+        loop = asyncio.get_running_loop()
+        try:
+            infos = await loop.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+            addrs = {info[4][0] for info in infos}
+        except OSError:
+            return host, port
+
+        if not addrs & self._local_addresses():
+            return host, port
+
+        _LOGGER.debug(
+            "Atmeex: %s указывает на нас самих (%s) — беру адрес облака по %s",
+            host,
+            ", ".join(sorted(addrs)),
+            UPSTREAM_FALLBACK_HOST,
+        )
+        return UPSTREAM_FALLBACK_HOST, port
+
+    @staticmethod
+    def _local_addresses() -> set[str]:
+        """Собственные адреса хоста, включая смотрящий в сеть."""
+        addrs = {"127.0.0.1", "::1"}
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            # Пакеты не уходят: ядро только выбирает исходящий адрес.
+            probe.connect(("192.0.2.1", 9))
+            addrs.add(probe.getsockname()[0])
+        except OSError:
+            pass
+        finally:
+            probe.close()
+        with contextlib.suppress(OSError):
+            addrs.update(
+                info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None)
+            )
+        return addrs
 
     async def _await_upstream_return(self, writer: asyncio.StreamWriter) -> None:
         """Ждать, пока облако оживёт, и разорвать автономную сессию.
