@@ -541,7 +541,7 @@ class TestSelfConnectionGuard(unittest.IsolatedAsyncioTestCase):
         # быть распознано и закрыто, а не обслужено как новое устройство.
         for _ in range(100):
             await asyncio.sleep(0.02)
-            if channel._own_endpoints:
+            if channel._own_ports:
                 break
 
         await asyncio.sleep(0.3)

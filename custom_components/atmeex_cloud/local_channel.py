@@ -174,9 +174,9 @@ class AtmeexLocalChannel:
         # с Python 3.12 Server.wait_closed() ждёт завершения ВСЕХ обработчиков,
         # а бризер держит соединение бесконечно — выгрузка интеграции повисла бы.
         self._writers: set[asyncio.StreamWriter] = set()
-        # Адреса наших собственных исходящих сокетов к облаку: по ним узнаём
+        # Порты наших собственных исходящих сокетов к облаку: по ним узнаём
         # себя, если имя облака заворачивается на нас же.
-        self._own_endpoints: set[tuple[str, int]] = set()
+        self._own_ports: set[int] = set()
         # Кому писать команды: mac -> (соединение, id устройства с суффиксом ':0')
         self._sessions: dict[str, tuple[asyncio.StreamWriter, str]] = {}
 
@@ -232,7 +232,12 @@ class AtmeexLocalChannel:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         peer = writer.get_extra_info("peername")
-        if isinstance(peer, tuple) and tuple(peer[:2]) in self._own_endpoints:
+        if (
+            isinstance(peer, tuple)
+            and len(peer) >= 2
+            and peer[1] in self._own_ports
+            and peer[0] in self._local_addresses()
+        ):
             # Наше же встречное соединение вернулось к нам: имя облака ведёт
             # на Home Assistant. Обслуживать его нельзя — будет рекурсия.
             _LOGGER.error(
@@ -312,9 +317,9 @@ class AtmeexLocalChannel:
             if relay is not None:
                 relay.cancel()
             if up_writer is not None:
-                sock = up_writer.get_extra_info("sockname")
-                if isinstance(sock, tuple) and len(sock) >= 2:
-                    self._own_endpoints.discard((sock[0], sock[1]))
+                own = up_writer.get_extra_info("sockname")
+                if isinstance(own, tuple) and len(own) >= 2:
+                    self._own_ports.discard(own[1])
             for w in (up_writer, writer):
                 if w is not None:
                     w.close()
@@ -330,10 +335,26 @@ class AtmeexLocalChannel:
             return None, None
 
         host, port = await self._resolve_upstream()
+
+        # Порт исходящего сокета резервируем ДО подключения и сразу помечаем
+        # своим. Иначе получается гонка: сервер может принять это соединение
+        # раньше, чем мы успеем его записать, и не узнает в нём себя.
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setblocking(False)
+        own_port: int | None = None
         try:
+            sock.bind(("", 0))
+            own_port = sock.getsockname()[1]
+            self._own_ports.add(own_port)
+
+            loop = asyncio.get_running_loop()
             async with asyncio.timeout(UPSTREAM_CONNECT_TIMEOUT):
-                reader, writer = await asyncio.open_connection(host, port)
+                await loop.sock_connect(sock, (host, port))
+                reader, writer = await asyncio.open_connection(sock=sock)
         except (OSError, TimeoutError) as err:
+            if own_port is not None:
+                self._own_ports.discard(own_port)
+            sock.close()
             _LOGGER.warning(
                 "Atmeex: облако %s:%s недоступно (%s) — локальный канал "
                 "отвечает устройству сам",
@@ -343,11 +364,6 @@ class AtmeexLocalChannel:
             )
             return None, None
 
-        # Запоминаем свой конец: если это соединение вернётся к нам входящим,
-        # значит имя облака указывает на нас же.
-        sock = writer.get_extra_info("sockname")
-        if isinstance(sock, tuple) and len(sock) >= 2:
-            self._own_endpoints.add((sock[0], sock[1]))
         return reader, writer
 
     async def _resolve_upstream(self) -> tuple[str, int]:
