@@ -371,3 +371,145 @@ class TestStandaloneRecovery(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             reader.at_eof(), "автономная сессия не разорвана после возвращения облака"
         )
+
+
+class TestLocalCommands(unittest.IsolatedAsyncioTestCase):
+    """Отправка команд в устройство по локальному каналу."""
+
+    PORT = 13903
+
+    async def asyncSetUp(self):
+        self.channel = AtmeexLocalChannel(port=self.PORT, upstream=None)
+        await self.channel.async_start()
+        self.reader, self.writer = await asyncio.open_connection("127.0.0.1", self.PORT)
+        self.writer.write(HELLO.encode())
+        await self.writer.drain()
+        # ответ на hello + два запроса — вычитываем, чтобы не мешали
+        acc, frames = "", []
+        while len(frames) < 3:
+            acc += (await asyncio.wait_for(self.reader.read(4096), timeout=5)).decode()
+            frames, _ = split_json_objects(acc)
+
+    async def asyncTearDown(self):
+        self.writer.close()
+        await self.channel.async_stop()
+
+    async def _receive(self, count):
+        acc, frames = "", []
+        while len(frames) < count:
+            acc += (await asyncio.wait_for(self.reader.read(4096), timeout=5)).decode()
+            frames, _ = split_json_objects(acc)
+        return [json.loads(f) for f in frames]
+
+    async def test_translates_cloud_params_into_channel_commands(self):
+        ok = await self.channel.async_send_params(
+            MAC, {"u_pwr_on": True, "u_fan_speed": 4}
+        )
+        self.assertTrue(ok)
+
+        frames = await self._receive(4)  # две команды + get_setp + get_state
+        cmds = [f["cmd"] for f in frames]
+        self.assertIn({"set_pwr_on": True}, cmds)
+        self.assertIn({"set_fan_speed": 4}, cmds)
+        # адресация обязана быть той же, что использует облако
+        self.assertTrue(all(f["id"] == DEVICE_ID for f in frames))
+        # после записи просим устройство отчитаться, а не ждём телеметрии
+        self.assertIn({"get_setp": True}, cmds)
+        self.assertIn({"get_state": True}, cmds)
+
+    async def test_refuses_when_device_is_not_connected(self):
+        self.assertFalse(
+            await self.channel.async_send_params("00:00:00:00:00:00", {"u_pwr_on": True})
+        )
+
+    async def test_unknown_parameter_does_not_break_the_rest(self):
+        ok = await self.channel.async_send_params(
+            MAC, {"u_fan_speed": 2, "u_something_new": 5}
+        )
+        self.assertTrue(ok, "известный параметр должен уйти несмотря на неизвестный")
+        cmds = [f["cmd"] for f in await self._receive(3)]
+        self.assertIn({"set_fan_speed": 2}, cmds)
+        self.assertNotIn("u_something_new", json.dumps(cmds))
+
+    async def test_is_connected_tracks_the_session(self):
+        self.assertTrue(self.channel.is_connected(MAC))
+        self.assertFalse(self.channel.is_connected("00:00:00:00:00:00"))
+
+
+class TestCommanderPolicy(unittest.IsolatedAsyncioTestCase):
+    """Куда уходит команда: облако первично, локальный канал подхватывает."""
+
+    def setUp(self):
+        self.commander_mod = _load("commander")
+        self.api_calls: list[tuple] = []
+        self.local_calls: list[tuple] = []
+        outer = self
+
+        class FakeApi:
+            def __init__(self, fail=False):
+                self.fail = fail
+
+            async def set_device_params(self, device_id, **params):
+                outer.api_calls.append((device_id, params))
+                if self.fail:
+                    raise RuntimeError("cloud is down")
+                return {"ok": True}
+
+        class FakeChannel:
+            def __init__(self, connected=True):
+                self._connected = connected
+
+            def is_connected(self, mac):
+                return self._connected
+
+            async def async_send_params(self, mac, params):
+                outer.local_calls.append((mac, params))
+                return True
+
+        self.FakeApi = FakeApi
+        self.FakeChannel = FakeChannel
+
+    def _commander(self, api, channel, mode):
+        return self.commander_mod.AtmeexCommander(
+            api,
+            channel_getter=lambda: channel,
+            mac_getter=lambda did: MAC,
+            mode=mode,
+        )
+
+    async def test_cloud_first_uses_the_cloud_when_it_answers(self):
+        c = self._commander(self.FakeApi(), self.FakeChannel(), "cloud_first")
+        await c.set_fan_speed(17428, 3)
+        self.assertEqual(self.api_calls, [(17428, {"u_fan_speed": 3})])
+        self.assertEqual(self.local_calls, [], "локальный путь не нужен, облако живо")
+
+    async def test_falls_back_to_local_when_the_cloud_fails(self):
+        c = self._commander(self.FakeApi(fail=True), self.FakeChannel(), "cloud_first")
+        await c.set_power(17428, True)
+        self.assertEqual(len(self.api_calls), 1, "сначала пробуем облако")
+        self.assertEqual(self.local_calls, [(MAC, {"u_pwr_on": True})])
+
+    async def test_cloud_only_raises_instead_of_going_local(self):
+        c = self._commander(self.FakeApi(fail=True), self.FakeChannel(), "cloud_only")
+        with self.assertRaises(Exception):
+            await c.set_power(17428, True)
+        self.assertEqual(self.local_calls, [], "режим cloud_only обязан остаться в облаке")
+
+    async def test_local_first_skips_the_cloud_entirely(self):
+        c = self._commander(self.FakeApi(), self.FakeChannel(), "local_first")
+        await c.set_target_temperature(17428, 20.5)
+        self.assertEqual(self.local_calls, [(MAC, {"u_temp_room": 205})])
+        self.assertEqual(self.api_calls, [], "локальный путь сработал, облако не трогаем")
+
+    async def test_local_first_falls_back_to_cloud_when_device_is_offline(self):
+        c = self._commander(
+            self.FakeApi(), self.FakeChannel(connected=False), "local_first"
+        )
+        await c.set_humid_stage(17428, 2)
+        self.assertEqual(self.local_calls, [])
+        self.assertEqual(self.api_calls, [(17428, {"u_hum_stg": 2})])
+
+    async def test_temperature_is_sent_in_tenths(self):
+        c = self._commander(self.FakeApi(), self.FakeChannel(), "cloud_first")
+        await c.set_target_temperature(17428, 18.0)
+        self.assertEqual(self.api_calls[-1][1], {"u_temp_room": 180})

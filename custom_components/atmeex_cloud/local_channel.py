@@ -52,6 +52,20 @@ UPSTREAM_RETRY_INTERVAL = 60
 # Опора для ресинхронизации потока: кадры устройства всегда начинаются с
 # {"id", ответы облака — с {"hello" (синхронизация времени) либо тоже с {"id".
 FRAME_PREFIXES = ('{"id"', '{"hello"')
+
+# Уставка из облачного API -> команда канала. Наблюдались в перехвате
+# set_pwr_on, set_fan_speed и set_cool_mode; остальные выведены по симметрии
+# имён и подтверждаются первой же удачной локальной записью.
+CMD_BY_PARAM = {
+    "u_pwr_on": "set_pwr_on",
+    "u_fan_speed": "set_fan_speed",
+    "u_damp_pos": "set_damp_pos",
+    "u_temp_room": "set_temp_room",
+    "u_hum_stg": "set_hum_stg",
+    "u_auto": "set_auto",
+    "u_night": "set_night",
+    "u_cool_mode": "set_cool_mode",
+}
 READ_CHUNK = 65536
 # Дальше этого размера буфер не растёт: если мы не смогли собрать объект,
 # значит поток рассинхронизирован и копить бесполезно.
@@ -155,6 +169,8 @@ class AtmeexLocalChannel:
         # с Python 3.12 Server.wait_closed() ждёт завершения ВСЕХ обработчиков,
         # а бризер держит соединение бесконечно — выгрузка интеграции повисла бы.
         self._writers: set[asyncio.StreamWriter] = set()
+        # Кому писать команды: mac -> (соединение, id устройства с суффиксом ':0')
+        self._sessions: dict[str, tuple[asyncio.StreamWriter, str]] = {}
 
         # последнее увиденное по каждому устройству, ключ — нормализованный MAC
         self.states: dict[str, dict[str, Any]] = {}
@@ -197,6 +213,7 @@ class AtmeexLocalChannel:
             self._server = None
 
         self.connected.clear()
+        self._sessions.clear()
         _LOGGER.info("Atmeex: локальный канал остановлен")
 
     # ------------------------------------------------------------------
@@ -258,6 +275,8 @@ class AtmeexLocalChannel:
         finally:
             if mac:
                 self.connected[mac] = False
+                if self._sessions.get(mac, (None, None))[0] is writer:
+                    self._sessions.pop(mac, None)
             self._writers.discard(writer)
             if relay is not None:
                 relay.cancel()
@@ -332,6 +351,56 @@ class AtmeexLocalChannel:
             _LOGGER.debug("Atmeex: обрыв ответного потока от облака", exc_info=True)
 
     # ------------------------------------------------------------------
+    # Отправка команд
+    # ------------------------------------------------------------------
+
+    def is_connected(self, mac: str) -> bool:
+        """Держит ли устройство прямо сейчас соединение с нами."""
+        return mac in self._sessions and bool(self.connected.get(mac))
+
+    async def async_send_params(self, mac: str, params: dict[str, Any]) -> bool:
+        """Отправить уставки устройству напрямую.
+
+        Принимает те же ключи `u_*`, что и облачный PUT /devices/{id}/params,
+        и переводит их в команды канала. Возвращает False, если устройство
+        сейчас не на связи — вызывающий решает, идти ли в облако.
+        """
+        session = self._sessions.get(mac)
+        if session is None or not self.connected.get(mac):
+            return False
+        writer, device_id = session
+
+        unknown = [key for key in params if key not in CMD_BY_PARAM]
+        if unknown:
+            _LOGGER.warning(
+                "Atmeex: нет локальной команды для %s — эти параметры "
+                "останутся необработанными",
+                ", ".join(sorted(unknown)),
+            )
+
+        sent = False
+        for key, value in params.items():
+            cmd = CMD_BY_PARAM.get(key)
+            if cmd is None or value is None:
+                continue
+            self._send(writer, {"id": device_id, "cmd": {cmd: value}})
+            sent = True
+            _LOGGER.debug("Atmeex: локально -> %s = %r (%s)", cmd, value, mac)
+
+        if not sent:
+            return False
+
+        # Просим устройство отчитаться, чтобы не ждать очередной телеметрии.
+        self._send(writer, {"id": device_id, "cmd": {"get_setp": True}})
+        self._send(writer, {"id": device_id, "cmd": {"get_state": True}})
+        try:
+            await writer.drain()
+        except OSError as err:
+            _LOGGER.warning("Atmeex: не удалось отправить команду локально: %s", err)
+            return False
+        return True
+
+    # ------------------------------------------------------------------
     # Разбор кадров
     # ------------------------------------------------------------------
 
@@ -353,6 +422,7 @@ class AtmeexLocalChannel:
 
         if isinstance(obj.get("hello"), dict):
             self.connected[mac] = True
+            self._sessions[mac] = (writer, str(device_id))
             _LOGGER.info(
                 "Atmeex: локальный канал — устройство %s (%s, прошивка %s)",
                 mac,
@@ -370,6 +440,7 @@ class AtmeexLocalChannel:
         if isinstance(obj.get("state"), dict):
             self.states[mac] = obj["state"]
             self.connected[mac] = True
+            self._sessions.setdefault(mac, (writer, str(device_id)))
             if self._on_state:
                 self._on_state(mac, obj["state"])
             return mac

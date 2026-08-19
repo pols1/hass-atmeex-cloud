@@ -12,12 +12,15 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .capabilities import MODES as CAP_MODES
+from .commander import WRITE_MODES
 from .const import (
     CONF_CO2_SENSOR,
     CONF_HUMIDIFIER,
     CONF_LOCAL_ENABLED,
     CONF_LOCAL_PORT,
+    CONF_WRITE_MODE,
     DEFAULT_CAP_MODE,
+    DEFAULT_WRITE_MODE,
     DEFAULT_LOCAL_ENABLED,
     DEFAULT_LOCAL_PORT,
     DOMAIN,
@@ -189,6 +192,10 @@ class AtmeexOptionsFlowHandler(config_entries.OptionsFlow):
                             CONF_LOCAL_ENABLED, DEFAULT_LOCAL_ENABLED
                         ),
                     ): bool,
+                    vol.Optional(
+                        CONF_WRITE_MODE,
+                        default=options.get(CONF_WRITE_MODE, DEFAULT_WRITE_MODE),
+                    ): vol.In(WRITE_MODES),
                     vol.Optional(
                         CONF_LOCAL_PORT,
                         default=options.get(CONF_LOCAL_PORT, DEFAULT_LOCAL_PORT),

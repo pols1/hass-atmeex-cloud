@@ -22,8 +22,12 @@ versioning follows [Semantic Versioning](https://semver.org/).
   cloud so the vendor app keeps working. Entities then update every few seconds instead
   of waiting for the 30-second cloud poll, and the stream carries room humidity and the
   humidifier water-tank flag. Off by default; enable it in the integration options and
-  redirect `ws.iot.atmeex.com` to Home Assistant (see README). Writing commands locally
-  is not implemented yet — control still goes through the cloud API.
+  redirect `ws.iot.atmeex.com` to Home Assistant (see README).
+- **Local command writing** with a selectable path (`Command path` option):
+  `cloud_first` (default) sends through the cloud and falls back to the local channel when
+  the cloud fails, `local_first` talks to the device directly, `cloud_only` never uses the
+  local channel. The default is cloud-first on purpose: the vendor app reads state from the
+  cloud, so writing past it would let the two views drift apart.
 - First tests in the repository: `tests/test_local_channel.py`, running on plain Python
   (no Home Assistant needed) against real captured frames, wired into CI.
 

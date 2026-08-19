@@ -24,6 +24,11 @@ DEFAULT_CAP_MODE = "auto"
 # Живут в entry.data, чтобы не переопределяться заново после перезапуска.
 DATA_CAPABILITIES = "capabilities"
 
+# Куда уходят команды. Облако первично не из-за надёжности, а ради
+# согласованности: приложение вендора читает состояние оттуда.
+CONF_WRITE_MODE = "write_mode"
+DEFAULT_WRITE_MODE = "cloud_first"
+
 # Логгер интеграции (его импортируют climate/fan/select)
 LOGGER = logging.getLogger(__package__)
 

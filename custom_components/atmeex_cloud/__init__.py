@@ -15,10 +15,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import AtmeexApi, ApiAuthError, ApiError
 from .capabilities import describe, detect_from_payload, merge
+from .commander import AtmeexCommander
 from .const import (
     CONF_LOCAL_ENABLED,
     CONF_LOCAL_PORT,
+    CONF_WRITE_MODE,
     DATA_CAPABILITIES,
+    DEFAULT_WRITE_MODE,
     DEFAULT_LOCAL_ENABLED,
     DEFAULT_LOCAL_PORT,
     DOMAIN,
@@ -144,9 +147,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """
         await coordinator.async_request_refresh()
 
+    def _mac_for(device_id: int | str) -> str | None:
+        """MAC устройства по его облачному id — ключ локального канала."""
+        data = coordinator.data or {}
+        for dev in data.get("devices") or []:
+            if isinstance(dev, dict) and str(dev.get("id")) == str(device_id):
+                return normalize_mac(dev.get("mac") or "") or None
+        return None
+
+    commander = AtmeexCommander(
+        api,
+        channel_getter=lambda: local_holder.get("channel"),
+        mac_getter=_mac_for,
+        mode=entry.options.get(CONF_WRITE_MODE, DEFAULT_WRITE_MODE),
+    )
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
-        "api": api,
+        # Сущности получают командира: интерфейс тот же, но он сам решает,
+        # уходит команда в облако или прямо в устройство.
+        "api": commander,
+        "cloud_api": api,
         "coordinator": coordinator,
         "refresh_device": refresh_device,  # <-- ВОТ ЭТОГО НЕ ХВАТАЛО
     }
