@@ -1,12 +1,14 @@
 {
   "domain": "atmeex_cloud",
   "name": "Atmeex Cloud",
-  "codeowners": ["@pols1"],
+  "codeowners": [
+    "@pols1"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/pols1/hass-atmeex-cloud",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/pols1/hass-atmeex-cloud/issues",
   "requirements": [],
-  "version": "0.5.10"
+  "version": "0.6.0"
 }

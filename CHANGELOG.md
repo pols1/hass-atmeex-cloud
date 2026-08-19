@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## [0.6.0] — unreleased
+## [0.6.0] — 2026-08-19
 
 ### Added
 - **Per-unit feature detection.** A7 ships in seven trims — Simple and Flow have neither
@@ -22,12 +22,20 @@ versioning follows [Semantic Versioning](https://semver.org/).
   cloud so the vendor app keeps working. Entities then update every few seconds instead
   of waiting for the 30-second cloud poll, and the stream carries room humidity and the
   humidifier water-tank flag. Off by default; enable it in the integration options and
-  redirect `ws.iot.atmeex.com` to Home Assistant (see README).
+  redirect the device channel to Home Assistant (see README). A NAT rule matching the
+  device address is the reliable way: on the install this was built against, the brizers
+  were never seen asking the router to resolve the channel hostname, so a DNS override
+  alone never reached them.
 - **Local command writing** with a selectable path (`Command path` option):
   `cloud_first` (default) sends through the cloud and falls back to the local channel when
   the cloud fails, `local_first` talks to the device directly, `cloud_only` never uses the
   local channel. The default is cloud-first on purpose: the vendor app reads state from the
   cloud, so writing past it would let the two views drift apart.
+
+  `set_pwr_on`, `set_fan_speed` and `set_cool_mode` were observed on the wire, and
+  `set_temp_room` was confirmed against a live device. The names for damper position and
+  humidification stage follow the same pattern but have not been exercised yet; they are
+  marked as inferred in the code.
 - First tests in the repository: `tests/test_local_channel.py`, running on plain Python
   (no Home Assistant needed) against real captured frames, wired into CI.
 
@@ -50,6 +58,17 @@ versioning follows [Semantic Versioning](https://semver.org/).
   now treated as online regardless of what the cloud reports.
 - Identical telemetry frames no longer publish a coordinator update; only the timestamp
   usually differs between them.
+- **The channel connected to itself** once the device hostname was redirected to Home
+  Assistant: the DNS override applies to Home Assistant too, so the upstream connection
+  looped back in, was taken for a new device, and opened another upstream — hundreds of
+  connections per second on the live install. The cloud address is now resolved via the
+  REST API hostname when the device hostname points at us, and inbound connections from
+  our own outbound socket are refused. The outgoing socket is bound before connecting so
+  the guard cannot lose a race against the accept.
+- The upstream is opened on the first frame rather than on every inbound socket. A health
+  probe against the channel — such as the netwatch guard that protects it — used to make
+  Home Assistant dial the vendor twice a minute, and the probe could outlast its own
+  timeout, which made the guard pull the redirect from a healthy service.
 
 ### Protocol notes
 The device channel is plain JSON over TCP on port 3001, without TLS. Objects arrive
@@ -57,7 +76,7 @@ concatenated with no delimiter and no length prefix. The device stays silent unt
 server answers its `hello` with a time sync — that is why a naive echo of its own
 settings gets no response. Commands are `{"id":"<MAC>:0","cmd":{"set_…": value}}`.
 
-## [0.5.10] — unreleased
+## [0.5.10] — 2026-08-17
 
 Compatibility fixes for Home Assistant 2026.x, and a move to this repository.
 
