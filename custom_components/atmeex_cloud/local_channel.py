@@ -245,19 +245,15 @@ class AtmeexLocalChannel:
         _LOGGER.debug("Atmeex: подключилось устройство %s", peer)
         self._writers.add(writer)
 
-        up_reader, up_writer = await self._connect_upstream()
+        # Встречное соединение открываем ЛЕНИВО — на первом кадре от
+        # устройства. Иначе любая проверка порта (например, netwatch,
+        # который стережёт этот же канал) заставляла бы нас дёргать облако
+        # вендора впустую каждые полминуты.
+        up_reader: asyncio.StreamReader | None = None
+        up_writer: asyncio.StreamWriter | None = None
         relay: asyncio.Task | None = None
         mac: str | None = None
-
-        if up_writer is not None:
-            relay = asyncio.create_task(self._relay_upstream(up_reader, writer))
-            self._tasks.add(relay)
-            relay.add_done_callback(self._tasks.discard)
-        elif self._upstream is not None:
-            # Обслуживаем устройство сами, но ждём возвращения облака.
-            relay = asyncio.create_task(self._await_upstream_return(writer))
-            self._tasks.add(relay)
-            relay.add_done_callback(self._tasks.discard)
+        upstream_tried = False
 
         buf = ""
         try:
@@ -265,6 +261,23 @@ class AtmeexLocalChannel:
                 chunk = await reader.read(READ_CHUNK)
                 if not chunk:
                     break
+
+                if not upstream_tried:
+                    # Первые байты пришли — значит это устройство, а не
+                    # проверка порта. Теперь имеет смысл идти в облако.
+                    upstream_tried = True
+                    up_reader, up_writer = await self._connect_upstream()
+                    if up_writer is not None:
+                        relay = asyncio.create_task(
+                            self._relay_upstream(up_reader, writer)
+                        )
+                    elif self._upstream is not None:
+                        relay = asyncio.create_task(
+                            self._await_upstream_return(writer)
+                        )
+                    if relay is not None:
+                        self._tasks.add(relay)
+                        relay.add_done_callback(self._tasks.discard)
 
                 # Облако — источник истины, пока оно на связи: отдаём байты
                 # дальше нетронутыми, чтобы приложение вендора работало.

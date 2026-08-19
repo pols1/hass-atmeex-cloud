@@ -574,3 +574,56 @@ class TestSelfConnectionGuard(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_address_is_trusted_as_is(self):
         channel = AtmeexLocalChannel(port=self.PORT, upstream=("10.9.9.9", 3001))
         self.assertEqual(await channel._resolve_upstream(), ("10.9.9.9", 3001))
+
+
+class TestLazyUpstream(unittest.IsolatedAsyncioTestCase):
+    """Проверка порта не должна дёргать облако.
+
+    netwatch стережёт этот же канал и раз в 30 секунд открывает соединение,
+    ничего в него не отправляя. Если открывать встречное сразу на входящем,
+    мы будем впустую соединяться с вендором дважды в минуту.
+    """
+
+    PORT = 13905
+    UPSTREAM_PORT = 13906
+
+    async def asyncSetUp(self):
+        self.upstream_hits = 0
+
+        async def on_upstream(reader, writer):
+            self.upstream_hits += 1
+            writer.close()
+
+        self.cloud = await asyncio.start_server(
+            on_upstream, "127.0.0.1", self.UPSTREAM_PORT
+        )
+        self.channel = AtmeexLocalChannel(
+            port=self.PORT, upstream=("127.0.0.1", self.UPSTREAM_PORT)
+        )
+        await self.channel.async_start()
+
+    async def asyncTearDown(self):
+        await self.channel.async_stop()
+        self.cloud.close()
+
+    async def test_port_probe_does_not_reach_the_cloud(self):
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.PORT)
+        writer.close()
+        await writer.wait_closed()
+        await asyncio.sleep(0.3)
+        self.assertEqual(
+            self.upstream_hits, 0, "пустая проверка порта ушла в облако"
+        )
+
+    async def test_real_device_still_gets_the_cloud(self):
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.PORT)
+        self.addCleanup(writer.close)
+        writer.write(HELLO.encode())
+        await writer.drain()
+        for _ in range(50):
+            if self.upstream_hits:
+                break
+            await asyncio.sleep(0.02)
+        self.assertEqual(
+            self.upstream_hits, 1, "кадр от устройства обязан открыть встречное"
+        )
