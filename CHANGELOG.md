@@ -7,6 +7,12 @@ versioning follows [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Fixed
+- **Every entity name repeated the device name.** `has_entity_name` tells Home Assistant
+  to put the device name in front itself, so the name property must carry only the part
+  that identifies the reading — all three platforms baked the device name in as well.
+  On a unit called "Бризер спальня" that produced "Бризер спальня Бризер спальня Humidity".
+  Climate, being the device's primary feature, now has no name of its own, which is the
+  documented way to say "call me after the device". Entity IDs are unchanged.
 - **The outdoor temperature sensor could never have a value.** A7 does not report
   `temp_out` at all — not locally, not through the cloud — so the entity sat at `unknown`
   for ever. It is now created only where a reading actually arrives, the same way the CO₂
