@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+- **Local frames were starving the cloud poll.** Pushing local data with
+  `async_set_updated_data` also resets the coordinator's poll timer, and frames arrive
+  every few seconds against a thirty-second interval — so with the local channel connected
+  the cloud was never polled. Outdoor temperature, the online flag and settings changed
+  from the vendor app would have quietly frozen. Data is now assigned and listeners
+  notified without touching the schedule. Confirmed on a live install: polls resumed at
+  exactly thirty-second spacing.
+
 ## [0.6.0] — 2026-08-19
 
 ### Added
