@@ -290,9 +290,14 @@ async def _async_setup_local_channel(
         if not payload_differs(data, key, did, payload):
             return
 
-        coordinator.async_set_updated_data(
-            {**data, "devices": new_devices, "states": states}
-        )
+        # Обновляем данные и уведомляем сущности, НЕ трогая расписание опроса.
+        # async_set_updated_data по документации сбрасывает таймер следующего
+        # опроса, а локальные кадры приходят каждые несколько секунд — при
+        # интервале в 30 секунд опрос облака не выполнялся бы вообще. А из
+        # облака приходит то, чего нет в локальном потоке: температура на
+        # улице, настройки, изменённые из приложения вендора, признак online.
+        coordinator.data = {**data, "devices": new_devices, "states": states}
+        coordinator.async_update_listeners()
 
     channel = AtmeexLocalChannel(
         port=port,
