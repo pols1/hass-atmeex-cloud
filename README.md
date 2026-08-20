@@ -176,11 +176,12 @@ The second rule is required when the brizer and Home Assistant share a bridge: w
 the reply comes from the wrong source address and the device drops the session.
 
 **By name.** A static DNS record pointing `ws.iot.atmeex.com` at Home Assistant is simpler
-and works on any router, Pi-hole or AdGuard Home — but only for devices that use the DNS
-server handed out by DHCP. The brizers here were never once seen asking the router to
-resolve that name, and kept going straight to the vendor with the record in place and
-enabled. Try it if you like, and check the result after a power cycle; if the device still
-lands on the vendor, use the NAT rule.
+and works on any router, Pi-hole or AdGuard Home. It did not work here: with the record
+live and enabled, a power-cycled brizer still went straight to the vendor. Why is not
+settled — the device does send DNS queries to the router, but we never captured it asking
+for this particular name, so it may be answering from a cached address. Try it if you
+like, then power-cycle a device and check where it lands; if it still reaches the vendor,
+use the NAT rule.
 
 ### The failsafe
 
@@ -206,6 +207,13 @@ seconds. If answering that probe makes Home Assistant do real work — as it did
 channel dialled the cloud on every inbound socket — the probe can outlast its own timeout,
 and the guard will declare a healthy service dead. A watchman who makes the owner run to the
 cellar on every knock eventually decides nobody is home.
+
+**Restarting Home Assistant costs you the channel for a while.** The guard polls every
+thirty seconds, so a restart that takes a couple of minutes is long enough for it to
+disable the redirect — and the devices, having reconnected straight to the vendor, stay
+there until their next reconnect, which can be a day away. Nothing breaks; the local
+channel is simply idle in the meantime. Plan updates accordingly, or power-cycle a device
+if you want it back immediately.
 
 ### What to expect during the switch
 
