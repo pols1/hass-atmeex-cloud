@@ -33,6 +33,7 @@ _LOGGER = logging.getLogger(__name__)
 
 CAP_CO2 = "co2"
 CAP_HUMIDIFIER = "humidifier"
+CAP_OUTDOOR_TEMP = "outdoor_temp"
 
 # Значения переключателей в настройках
 MODE_AUTO = "auto"
@@ -54,6 +55,13 @@ def detect_from_payload(payload: dict[str, Any] | None) -> dict[str, bool]:
     co2 = payload.get("co2_ppm")
     if isinstance(co2, (int, float)) and co2 > 0:
         found[CAP_CO2] = True
+
+    # Уличный датчик: A7 поле temp_out не присылает вообще — ни локально,
+    # ни через облако. Сущность для него создавалась всегда и вечно висела
+    # в unknown. Теперь создаётся, только если значение реально пришло.
+    outdoor = payload.get("temp_out")
+    if isinstance(outdoor, (int, float)):
+        found[CAP_OUTDOOR_TEMP] = True
 
     hum = payload.get("hum_room")
     if isinstance(hum, (int, float)) and hum > 0:
@@ -97,5 +105,6 @@ def describe(detected: dict[str, bool] | None) -> str:
     parts = [
         f"датчик CO2: {'есть' if detected.get(CAP_CO2) else 'не обнаружен'}",
         f"увлажнитель: {'есть' if detected.get(CAP_HUMIDIFIER) else 'не обнаружен'}",
+        f"уличный датчик: {'есть' if detected.get(CAP_OUTDOOR_TEMP) else 'не обнаружен'}",
     ]
     return ", ".join(parts)

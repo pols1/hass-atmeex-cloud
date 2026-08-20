@@ -18,7 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 
-from .capabilities import CAP_CO2, CAP_HUMIDIFIER, resolve
+from .capabilities import CAP_CO2, CAP_HUMIDIFIER, CAP_OUTDOOR_TEMP, resolve
 from .const import (
     CONF_CO2_SENSOR,
     CONF_HUMIDIFIER,
@@ -97,12 +97,24 @@ async def async_setup_entry(
             )
         )
         entities.append(
-            AtmeexTempOutSensor(
+            AtmeexTempRoomSensor(
                 coordinator=coordinator,
                 device_id=did_int,
                 device_name=name,
             )
         )
+
+        # Уличный датчик создаём только там, где значение действительно
+        # приходит: A7 поле temp_out не отдаёт, и сущность вечно висела
+        # в unknown.
+        if resolve(CAP_OUTDOOR_TEMP, detected, DEFAULT_CAP_MODE):
+            entities.append(
+                AtmeexTempOutSensor(
+                    coordinator=coordinator,
+                    device_id=did_int,
+                    device_name=name,
+                )
+            )
 
     if entities:
         async_add_entities(entities)
@@ -183,12 +195,32 @@ class AtmeexTempInSensor(AtmeexBaseSensor):
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
 
     def __init__(self, coordinator, device_id: int, device_name: str) -> None:
-        super().__init__(coordinator, device_id, device_name, "temp_in", "Indoor Temperature")
+        # temp_in — воздух на входе устройства, а не комната. Комнатную
+        # температуру устройство отдаёт отдельно, в temp_room; именно её
+        # показывает климат-сущность как текущую. Прежнее название
+        # «Indoor Temperature» вводило в заблуждение.
+        super().__init__(coordinator, device_id, device_name, "temp_in", "Intake Temperature")
 
     @property
     def native_value(self) -> float | None:
         val = self._state.get("temp_in")
         return (val / 10.0) if isinstance(val, (int, float)) else None
+
+class AtmeexTempRoomSensor(AtmeexBaseSensor):
+    """Температура в помещении — то же значение, что на карточке климата."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+
+    def __init__(self, coordinator, device_id: int, device_name: str) -> None:
+        super().__init__(coordinator, device_id, device_name, "temp_room", "Room Temperature")
+
+    @property
+    def native_value(self) -> float | None:
+        val = self._state.get("temp_room")
+        return (val / 10.0) if isinstance(val, (int, float)) else None
+
 
 class AtmeexTempOutSensor(AtmeexBaseSensor):
     _attr_device_class = SensorDeviceClass.TEMPERATURE

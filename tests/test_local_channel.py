@@ -627,3 +627,30 @@ class TestLazyUpstream(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.upstream_hits, 1, "кадр от устройства обязан открыть встречное"
         )
+
+
+class TestOutdoorSensorDetection(unittest.TestCase):
+    """Уличный датчик: A7 поле temp_out не отдаёт вовсе.
+
+    Сущность создавалась всегда и вечно висела в unknown. Теперь она
+    появляется только там, где значение действительно приходит.
+    """
+
+    def setUp(self):
+        self.caps = _load("capabilities")
+
+    def test_a7_frame_gives_no_outdoor_capability(self):
+        """Настоящий кадр с живого A7: temp_out в нём отсутствует."""
+        state = json.loads(STATE)["state"]
+        self.assertNotIn("temp_out", state, "фикстура должна отражать реальный кадр")
+        found = self.caps.detect_from_payload(state)
+        self.assertNotIn(self.caps.CAP_OUTDOOR_TEMP, found)
+
+    def test_real_outdoor_reading_enables_it(self):
+        found = self.caps.detect_from_payload({"temp_out": -85})
+        self.assertTrue(found.get(self.caps.CAP_OUTDOOR_TEMP))
+
+    def test_zero_outdoor_is_still_a_reading(self):
+        """Ноль градусов — нормальная температура, в отличие от нуля ppm CO2."""
+        found = self.caps.detect_from_payload({"temp_out": 0})
+        self.assertTrue(found.get(self.caps.CAP_OUTDOOR_TEMP))

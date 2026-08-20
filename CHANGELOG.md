@@ -7,6 +7,15 @@ versioning follows [Semantic Versioning](https://semver.org/).
 ## Unreleased
 
 ### Fixed
+- **The outdoor temperature sensor could never have a value.** A7 does not report
+  `temp_out` at all — not locally, not through the cloud — so the entity sat at `unknown`
+  for ever. It is now created only where a reading actually arrives, the same way the CO₂
+  sensor is.
+- **"Indoor Temperature" was showing the intake air, not the room.** It reads `temp_in`,
+  which is the air entering the unit; the room temperature lives in `temp_room` and is what
+  the climate entity shows as current. The sensor is renamed to Intake Temperature and a
+  proper Room Temperature sensor is added alongside it. Entity IDs and history are
+  unaffected — only the displayed name changes.
 - **Local frames were starving the cloud poll.** Pushing local data with
   `async_set_updated_data` also resets the coordinator's poll timer, and frames arrive
   every few seconds against a thirty-second interval — so with the local channel connected
