@@ -4,7 +4,10 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [0.6.1] — 2026-08-20
+
+Four fixes found by looking at what the entities actually showed on a live install,
+the day after 0.6.0 shipped.
 
 ### Fixed
 - **Every entity name repeated the device name.** `has_entity_name` tells Home Assistant

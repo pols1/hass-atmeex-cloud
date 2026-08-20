@@ -266,7 +266,7 @@ python3 -m unittest discover -s tests -v
 2. Добавить раздел в `CHANGELOG.md`.
 3. Закоммитить и запушить.
 4. Поставить тег и отправить его:
-   `git tag -a v0.6.0 -m "Release 0.6.0"` и `git push --tags`.
+   `git tag -a vX.Y.Z -m "Release X.Y.Z"` и `git push --tags`.
 5. Создать GitHub Release — HACS предлагает обновления по опубликованным релизам, коммит в
    `main` до пользователей не доедет.
 
