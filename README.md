@@ -208,6 +208,15 @@ channel dialled the cloud on every inbound socket — the probe can outlast its 
 and the guard will declare a healthy service dead. A watchman who makes the owner run to the
 cellar on every knock eventually decides nobody is home.
 
+**RouterOS caveat.** `netwatch` with `type=tcp-conn` has no "N consecutive failures" setting
+— the thresholds (`thr-loss-count` and friends) apply to ICMP probes only, `thr-tcp-conn-time`
+is a latency ceiling on a *successful* connect, and `start-delay` covers startup rather than
+later transitions. The first failed probe therefore trips the guard, which is why a Home
+Assistant restart takes the redirect down. Soften it by re-checking inside the down-script:
+wait out a typical restart, probe the port again, and disable the rules only if it is still
+dead. The cost is honest — during a genuine outage the redirect now survives a couple of
+minutes longer, so a device reconnecting in that window fails once before falling back.
+
 **Restarting Home Assistant costs you the channel for a while.** The guard polls every
 thirty seconds, so a restart that takes a couple of minutes is long enough for it to
 disable the redirect — and the devices, having reconnected straight to the vendor, stay
