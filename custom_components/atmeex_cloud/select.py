@@ -31,9 +31,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         did = dev.get("id")
         if did is None:
             continue
-        name = dev.get("name") or f"Device {did}"
-        entities.append(HumidificationSelect(coordinator, api, did, f"{name} humidification mode"))
-        entities.append(BrizerModeSelect(coordinator, api, did, f"{name} brizer mode"))
+        entities.append(HumidificationSelect(coordinator, api, did, "Humidification mode"))
+        entities.append(BrizerModeSelect(coordinator, api, did, "Brizer mode"))
 
     if entities:
         async_add_entities(entities)

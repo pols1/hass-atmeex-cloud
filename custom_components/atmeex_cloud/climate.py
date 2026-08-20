@@ -155,7 +155,10 @@ class AtmeexClimateEntity(CoordinatorEntity, ClimateEntity):
         self.api = api
         self._entry_id = entry_id
         self._device_id = int(device_id)
-        self._attr_name = name
+        # Климат — основная сущность устройства, поэтому имени у неё нет:
+        # при has_entity_name=True это значит «называйся как устройство».
+        # `name` оставлен в сигнатуре ради совместимости вызова.
+        self._attr_name = None
         self._refresh_device = refresh_device
         self._attr_unique_id = f"{self._device_id}_climate"
 

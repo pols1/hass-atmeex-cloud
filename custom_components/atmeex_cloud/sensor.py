@@ -126,7 +126,10 @@ class AtmeexBaseSensor(CoordinatorEntity, SensorEntity):
         self._device_id = device_id
         self._device_name = device_name
         self._key = key
-        self._attr_name = f"{device_name} {name_suffix}"
+        # has_entity_name=True означает, что HA сам подставит имя устройства
+        # перед именем сущности. Поэтому здесь только та часть, что называет
+        # сам показатель: иначе выходило «Бризер спальня Бризер спальня Humidity».
+        self._attr_name = name_suffix
         self._attr_unique_id = f"{device_id}_{key}"
         self._attr_has_entity_name = True
 
