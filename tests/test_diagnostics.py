@@ -214,6 +214,13 @@ class DiagnosticsTest(unittest.TestCase):
         self.assertEqual(diag["local_channel"]["connected"], ["12746"])
         self.assertNotIn("unmatched_1", diag["local_channel"]["states"])
 
+    def test_log_redaction_covers_diagnostics_keys(self) -> None:
+        # То, что скрыто в файле диагностики, не должно утекать через отладочный лог.
+        import importlib
+
+        log_keys = importlib.import_module("atmeex_diag_pkg.redact").SENSITIVE_KEYS
+        self.assertLessEqual(set(diagnostics.TO_REDACT), set(log_keys))
+
     def test_not_loaded_entry(self) -> None:
         hass = types.SimpleNamespace(data={})
         diag = asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, _Entry()))

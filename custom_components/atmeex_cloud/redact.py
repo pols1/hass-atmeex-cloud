@@ -6,7 +6,7 @@
 Ключи оставляем: по ним видно, что сервер вообще прислал.
 
 Диагностика (diagnostics.py) закрывает свой набор TO_REDACT штатным
-async_redact_data — он шире: там ещё MAC, owner_id и имя Wi-Fi сети.
+async_redact_data; он обязан входить в SENSITIVE_KEYS — это проверяет тест.
 
 Модуль не зависит ни от homeassistant, ни от aiohttp, поэтому тестируется
 на голом Python.
@@ -30,14 +30,23 @@ SENSITIVE_KEYS = frozenset(
         "password",
         "email",
         "authorization",
+        # Ответ /devices: владелец, экземпляр устройства и Wi-Fi сеть дома
+        # (схемы Device, DeviceCondition, User в OpenAPI облака). Тот же
+        # набор закрывает диагностика.
+        "phone",
+        "owner_id",
+        "user_id",
+        "mac",
+        "network_name",
     }
 )
 
 # Для тел, которые не разбираются как JSON (обрезанные, битые, текст с
 # вкраплениями JSON): "ключ": "значение" — значение может быть без
-# закрывающей кавычки, если строку обрезали посреди токена.
+# закрывающей кавычки, если строку обрезали посреди токена. owner_id и
+# user_id — числа, поэтому ловим и числовое значение.
 _JSON_PAIR_RE = re.compile(
-    r'("(?:' + "|".join(sorted(SENSITIVE_KEYS)) + r')"\s*:\s*)"[^"]*"?',
+    r'("(?:' + "|".join(sorted(SENSITIVE_KEYS)) + r')"\s*:\s*)(?:"[^"]*"?|-?\d+)',
     re.IGNORECASE,
 )
 _BEARER_RE = re.compile(r"(Bearer\s+)[^\s\"',;]+", re.IGNORECASE)

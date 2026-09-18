@@ -16,6 +16,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
   the Wi-Fi network the unit is connected to. The local channel keys its data by MAC, so
   in the download it is keyed by the cloud device id instead.
 
+### Security
+- **Debug logs no longer show the owner, the device MAC or the Wi-Fi network.** 0.6.2 hid
+  credentials; the `/devices` response logged at debug level still carried `owner_id`, the
+  MAC and `network_name`. These — plus `user_id` and `phone` — are now redacted in logs the
+  same way as in diagnostics, and a test keeps the two lists from drifting apart. The local
+  channel's own debug messages still name devices by MAC; that is left as is on purpose,
+  since matching a device to its connection is what those messages are for.
+
 ## [0.6.2] — 2026-09-18
 
 A security fix: debug logs no longer carry the account's tokens.

@@ -70,6 +70,33 @@ class RedactBodyTest(unittest.TestCase):
         self.assertNotIn(ACCESS, out)
         self.assertIn("Bearer " + REDACTED, out)
 
+    def test_devices_body_hides_owner_mac_and_wifi(self) -> None:
+        body = json.dumps(
+            [
+                {
+                    "id": 12746,
+                    "name": "Бризер спальня",
+                    "mac": "84:1F:E8:A5:D7:A0",
+                    "owner_id": 987654,
+                    "condition": {"temp_room": 213, "network_name": "HomeNet-SSID"},
+                }
+            ],
+            ensure_ascii=False,
+        )
+        out = redact_body(body, 1000)
+        for leaked in ("84:1F:E8", "987654", "HomeNet-SSID"):
+            self.assertNotIn(leaked, out)
+        dev = json.loads(out)[0]
+        self.assertEqual((dev["id"], dev["name"]), (12746, "Бризер спальня"))
+        self.assertEqual(dev["condition"]["temp_room"], 213)
+
+    def test_truncated_body_hides_numeric_owner_id(self) -> None:
+        body = '[{"id": 12746, "owner_id": 987654, "mac": "84:1F:E8:A5:D7:A0", "na'
+        out = redact_body(body)
+        self.assertNotIn("987654", out)
+        self.assertNotIn("84:1F:E8", out)
+        self.assertIn('"id": 12746', out)
+
     def test_key_match_is_case_insensitive(self) -> None:
         out = redact_body('{"Access_Token": "abc", "Password": "hunter2"}')
         self.assertNotIn("abc", out)
