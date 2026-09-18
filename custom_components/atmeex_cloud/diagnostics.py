@@ -89,6 +89,8 @@ def _diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
             "coordinator": coordinator_info,
             "devices": devices,
             "local_channel": _local_snapshot(runtime.get("local"), devices),
+            # Состояние push-канала: без токенов и MAC, устройства по облачному id.
+            "cloud_push": runtime["push"].status() if runtime.get("push") else None,
         },
         TO_REDACT,
     )
@@ -116,4 +118,7 @@ async def async_get_device_diagnostics(
         local["connected"] = [did for did in local["connected"] if did in wanted]
         local["states"] = {k: v for k, v in local["states"].items() if k in wanted}
         local["setpoints"] = {k: v for k, v in local["setpoints"].items() if k in wanted}
+    push = diag["cloud_push"]
+    if push is not None:
+        push["devices_seen"] = [did for did in push["devices_seen"] if did in wanted]
     return diag

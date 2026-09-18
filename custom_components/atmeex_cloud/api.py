@@ -179,6 +179,22 @@ class AtmeexApi:
 
             await self._signin_basic()
 
+    async def get_access_token(self, rejected: str | None = None) -> str:
+        """Действующий access_token для push-канала.
+
+        rejected — токен, который сервер только что отверг. Если он всё ещё
+        текущий, считаем его недействительным и продлеваем, даже когда по
+        нашим часам срок не вышел: иначе канал получал бы тот же токен снова.
+        """
+        if rejected:
+            async with self._auth_lock:
+                if self._access_token == rejected:
+                    self._access_token = None
+        await self.ensure_token()
+        if not self._access_token:
+            raise ApiAuthError("access_token is missing after sign-in")
+        return self._access_token
+
     # ---------------------------
     # Request wrapper
     # ---------------------------

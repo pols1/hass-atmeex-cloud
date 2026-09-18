@@ -16,19 +16,24 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import AtmeexApi, ApiAuthError, ApiError
 from .capabilities import describe, detect_from_payload, merge
 from .commander import AtmeexCommander
+from .cloud_push import AtmeexCloudPush, aiohttp_connector
 from .const import (
+    CONF_CLOUD_PUSH,
     CONF_LOCAL_ENABLED,
     CONF_LOCAL_PORT,
     CONF_WRITE_MODE,
     DATA_CAPABILITIES,
+    DEFAULT_CLOUD_PUSH,
     DEFAULT_WRITE_MODE,
     DEFAULT_LOCAL_ENABLED,
     DEFAULT_LOCAL_PORT,
     DOMAIN,
     PLATFORMS,
+    PUSH_FRESH_SECONDS,
 )
 from .data_merge import payload_differs
 from .local_channel import AtmeexLocalChannel, normalize_mac
+from .reload_policy import RELOAD_DATA_KEYS, needs_reload
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,9 +71,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         token_update_cb=_save_tokens,
     )
 
-    # Канал создаётся после координатора, поэтому ссылку кладём в держатель:
-    # опрос облака должен знать, кто прямо сейчас говорит с нами локально.
-    local_holder: dict[str, Any] = {}
+    # Каналы создаются после координатора, поэтому ссылки кладём в держатель:
+    # опрос облака должен знать, что пришло по ним, пока он ждал ответа.
+    channels: dict[str, Any] = {}
 
     async def async_update_data() -> dict[str, Any]:
         try:
@@ -98,7 +103,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 if did is not None and isinstance(cond, dict):
                     states[str(did)] = cond
 
-        channel = local_holder.get("channel")
+        push = channels.get("push")
+        if push is not None:
+            # Состояние из push-канала пришло секунды назад, а condition в
+            # ответе REST может отставать. И устройство, от которого минуту
+            # назад пришла телеметрия, на связи — что бы ни думало облако.
+            for dev in devices:
+                if not isinstance(dev, dict) or dev.get("id") is None:
+                    continue
+                did = str(dev.get("id"))
+                fresh = push.fresh_state(did, PUSH_FRESH_SECONDS)
+                if fresh:
+                    dev["online"] = True
+                    states[did] = {**(states.get(did) or {}), **fresh}
+                    dev["condition"] = {**(dev.get("condition") or {}), **fresh}
+
+        channel = channels.get("local")
         if channel is not None:
             # Устройство, которое прямо сейчас держит с нами соединение,
             # офлайном быть не может — что бы ни думало облако. Без этого
@@ -157,7 +177,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     commander = AtmeexCommander(
         api,
-        channel_getter=lambda: local_holder.get("channel"),
+        channel_getter=lambda: channels.get("local"),
         mac_getter=_mac_for,
         mode=entry.options.get(CONF_WRITE_MODE, DEFAULT_WRITE_MODE),
     )
@@ -170,12 +190,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "cloud_api": api,
         "coordinator": coordinator,
         "refresh_device": refresh_device,  # <-- ВОТ ЭТОГО НЕ ХВАТАЛО
+        # С чем сравнивать при следующем изменении записи — см. async_reload_entry.
+        "snapshot": _entry_snapshot(entry),
     }
 
-    local = await _async_setup_local_channel(hass, entry, coordinator)
+    merge_frame = _make_merger(coordinator)
+
+    if entry.options.get(CONF_CLOUD_PUSH, DEFAULT_CLOUD_PUSH):
+        push = AtmeexCloudPush(
+            token_getter=api.get_access_token,
+            on_update=lambda update: merge_frame(
+                update.kind,
+                update.payload,
+                device_id=update.device_id,
+                mac=normalize_mac(update.mac) or None,
+            ),
+            connector=aiohttp_connector(session),
+        )
+        push.start(
+            lambda coro: entry.async_create_background_task(hass, coro, "atmeex_cloud push")
+        )
+        entry.async_on_unload(push.async_stop)
+        channels["push"] = push
+        hass.data[DOMAIN][entry.entry_id]["push"] = push
+
+    local = await _async_setup_local_channel(hass, entry, merge_frame)
     if local is not None:
         hass.data[DOMAIN][entry.entry_id]["local"] = local
-        local_holder["channel"] = local
+        channels["local"] = local
 
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
@@ -227,28 +269,21 @@ def _async_learn_capabilities(
         )
 
 
-async def _async_setup_local_channel(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    coordinator: DataUpdateCoordinator,
-) -> AtmeexLocalChannel | None:
-    """Поднять локальный канал, если он включён в настройках интеграции.
+def _make_merger(coordinator: DataUpdateCoordinator) -> Any:
+    """Слияние кадров локального канала и push-канала с данными координатора.
 
-    Бризер не слушает портов и только звонит в облако, поэтому канал — это
-    приёмная сторона его соединения; трафик заворачивается на Home Assistant
-    статической DNS-записью или правилом на роутере (см. README).
+    Оба канала говорят в одних терминах: state ложится в condition, setp — в
+    settings, имена полей совпадают с облачными. Локальный канал знает
+    устройство по MAC, push-канал — по облачному id (и MAC тоже).
     """
-    if not entry.options.get(CONF_LOCAL_ENABLED, DEFAULT_LOCAL_ENABLED):
-        return None
 
-    port = int(entry.options.get(CONF_LOCAL_PORT, DEFAULT_LOCAL_PORT))
-
-    def _merge(mac: str, key: str, payload: dict[str, Any]) -> None:
-        """Влить локальный кадр в данные координатора и обновить сущности.
-
-        Имена полей локального протокола совпадают с облачными: state ложится
-        в condition, setp — в settings, поэтому трансляция не нужна.
-        """
+    def merge_frame(
+        key: str,
+        payload: dict[str, Any],
+        *,
+        mac: str | None = None,
+        device_id: str | None = None,
+    ) -> None:
         data = coordinator.data
         if not isinstance(data, dict):
             return
@@ -258,15 +293,19 @@ async def _async_setup_local_channel(
             (
                 dev
                 for dev in devices
-                if isinstance(dev, dict) and normalize_mac(dev.get("mac") or "") == mac
+                if isinstance(dev, dict)
+                and (
+                    (device_id is not None and str(dev.get("id")) == str(device_id))
+                    or (mac and normalize_mac(dev.get("mac") or "") == mac)
+                )
             ),
             None,
         )
         if target is None:
             _LOGGER.debug(
-                "Atmeex: локальный кадр от %s, но такого MAC нет среди устройств "
+                "Atmeex: кадр для устройства %s, которого нет среди устройств "
                 "аккаунта — игнорирую",
-                mac,
+                device_id or mac,
             )
             return
 
@@ -292,17 +331,34 @@ async def _async_setup_local_channel(
 
         # Обновляем данные и уведомляем сущности, НЕ трогая расписание опроса.
         # async_set_updated_data по документации сбрасывает таймер следующего
-        # опроса, а локальные кадры приходят каждые несколько секунд — при
-        # интервале в 30 секунд опрос облака не выполнялся бы вообще. А из
-        # облака приходит то, чего нет в локальном потоке: температура на
-        # улице, настройки, изменённые из приложения вендора, признак online.
+        # опроса, а кадры приходят каждые несколько секунд — при интервале в
+        # 30 секунд опрос облака не выполнялся бы вообще.
         coordinator.data = {**data, "devices": new_devices, "states": states}
         coordinator.async_update_listeners()
 
+    return merge_frame
+
+
+async def _async_setup_local_channel(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    merge_frame: Any,
+) -> AtmeexLocalChannel | None:
+    """Поднять локальный канал, если он включён в настройках интеграции.
+
+    Бризер не слушает портов и только звонит в облако, поэтому канал — это
+    приёмная сторона его соединения; трафик заворачивается на Home Assistant
+    статической DNS-записью или правилом на роутере (см. README).
+    """
+    if not entry.options.get(CONF_LOCAL_ENABLED, DEFAULT_LOCAL_ENABLED):
+        return None
+
+    port = int(entry.options.get(CONF_LOCAL_PORT, DEFAULT_LOCAL_PORT))
+
     channel = AtmeexLocalChannel(
         port=port,
-        on_state=lambda mac, payload: _merge(mac, "state", payload),
-        on_setp=lambda mac, payload: _merge(mac, "setp", payload),
+        on_state=lambda mac, payload: merge_frame("state", payload, mac=mac),
+        on_setp=lambda mac, payload: merge_frame("setp", payload, mac=mac),
     )
 
     try:
@@ -327,6 +383,38 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     return unload_ok
 
+def _entry_snapshot(entry: ConfigEntry) -> dict[str, Any]:
+    """Настройки и комплектация — без токенов и пароля: им в памяти не место."""
+    return {
+        "options": dict(entry.options),
+        "data": {key: entry.data.get(key) for key in RELOAD_DATA_KEYS},
+    }
+
+
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload config entry when options change."""
-    await hass.config_entries.async_reload(entry.entry_id)
+    """Слушатель обновлений записи: перезагружать, только когда это нужно.
+
+    Home Assistant зовёт его на любое изменение записи, в том числе на
+    сохранение продлённых токенов. Раньше это перезагружало интеграцию каждые
+    2 ч 59 мин — подробности в reload_policy.py.
+    """
+    runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if runtime is None:
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+
+    snapshot = runtime.get("snapshot") or {"options": {}, "data": {}}
+    reload = needs_reload(snapshot["options"], entry.options, snapshot["data"], entry.data)
+    runtime["snapshot"] = _entry_snapshot(entry)
+
+    if reload:
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+
+    # Режим записи применяется на ходу: перезагрузка закрыла бы локальный
+    # канал вместе с соединением бризера, ради которого режим и меняют.
+    mode = entry.options.get(CONF_WRITE_MODE, DEFAULT_WRITE_MODE)
+    commander = runtime.get("api")
+    if isinstance(commander, AtmeexCommander) and commander.mode != mode:
+        commander.set_mode(mode)
+        _LOGGER.info("Atmeex: режим записи переключён на %s без перезагрузки", mode)

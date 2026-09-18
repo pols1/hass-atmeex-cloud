@@ -514,6 +514,22 @@ class TestCommanderPolicy(unittest.IsolatedAsyncioTestCase):
         await c.set_target_temperature(17428, 18.0)
         self.assertEqual(self.api_calls[-1][1], {"u_temp_room": 180})
 
+    async def test_mode_switches_live(self):
+        # Смена режима не перезагружает интеграцию — иначе закрылся бы канал,
+        # ради которого режим меняют.
+        c = self._commander(self.FakeApi(), self.FakeChannel(), "cloud_first")
+        c.set_mode("local_first")
+        self.assertEqual(c.mode, "local_first")
+        await c.set_power(17428, False)
+        self.assertEqual(self.local_calls, [(MAC, {"u_pwr_on": False})])
+        self.assertEqual(self.api_calls, [])
+
+    def test_unknown_mode_is_rejected(self):
+        c = self._commander(self.FakeApi(), self.FakeChannel(), "cloud_first")
+        with self.assertRaises(ValueError):
+            c.set_mode("local_only")
+        self.assertEqual(c.mode, "cloud_first")
+
 
 class TestSelfConnectionGuard(unittest.IsolatedAsyncioTestCase):
     """Подмена DNS действует и на сам Home Assistant.

@@ -39,6 +39,16 @@ class AtmeexCommander:
         self._mac = mac_getter
         self._mode = mode
 
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    def set_mode(self, mode: str) -> None:
+        """Сменить путь записи на ходу, без перезагрузки интеграции."""
+        if mode not in (WRITE_CLOUD_FIRST, WRITE_LOCAL_FIRST, WRITE_CLOUD_ONLY):
+            raise ValueError(f"неизвестный режим записи: {mode}")
+        self._mode = mode
+
     # ------------------------------------------------------------------
     # Ядро
     # ------------------------------------------------------------------

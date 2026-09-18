@@ -14,6 +14,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .capabilities import MODES as CAP_MODES
 from .commander import WRITE_MODES
 from .const import (
+    CONF_CLOUD_PUSH,
+    DEFAULT_CLOUD_PUSH,
     CONF_CO2_SENSOR,
     CONF_HUMIDIFIER,
     CONF_LOCAL_ENABLED,
@@ -185,6 +187,10 @@ class AtmeexOptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Optional(
                         "enable_cool",
                         default=options.get("enable_cool", False),
+                    ): bool,
+                    vol.Optional(
+                        CONF_CLOUD_PUSH,
+                        default=options.get(CONF_CLOUD_PUSH, DEFAULT_CLOUD_PUSH),
                     ): bool,
                     vol.Optional(
                         CONF_LOCAL_ENABLED,

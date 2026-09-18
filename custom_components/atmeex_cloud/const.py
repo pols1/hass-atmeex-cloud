@@ -29,6 +29,13 @@ DATA_CAPABILITIES = "capabilities"
 CONF_WRITE_MODE = "write_mode"
 DEFAULT_WRITE_MODE = "cloud_first"
 
+# Push-канал облака: вебсокет приложения вендора (см. cloud_push.py). Даёт
+# состояние раз в ~5 с и изменения уставок сразу, без перехвата трафика.
+CONF_CLOUD_PUSH = "cloud_push"
+DEFAULT_CLOUD_PUSH = True
+# Сколько секунд состояние из push-канала считается свежим. Старше — верим опросу.
+PUSH_FRESH_SECONDS = 60
+
 # Логгер интеграции (его импортируют climate/fan/select)
 LOGGER = logging.getLogger(__package__)
 

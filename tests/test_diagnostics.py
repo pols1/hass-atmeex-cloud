@@ -152,10 +152,23 @@ class _Device:
     identifiers = {(DOMAIN, "12746")}
 
 
-def _hass(local: bool = True) -> Any:
+class _Push:
+    def status(self) -> dict[str, Any]:
+        return {
+            "connected": True,
+            "connections": 2,
+            "seconds_since_last_message": 4.9,
+            "last_error": "соединение закрыто (код 1006)",
+            "devices_seen": ["12746", "17428"],
+        }
+
+
+def _hass(local: bool = True, push: bool = True) -> Any:
     runtime: dict[str, Any] = {"coordinator": _Coordinator([_device()])}
     if local:
         runtime["local"] = _Channel()
+    if push:
+        runtime["push"] = _Push()
     return types.SimpleNamespace(data={DOMAIN: {"entry1": runtime}})
 
 
@@ -197,6 +210,18 @@ class DiagnosticsTest(unittest.TestCase):
         )
         self.assertIsNone(diag["local_channel"])
 
+    def test_cloud_push_status(self) -> None:
+        diag = asyncio.run(diagnostics.async_get_config_entry_diagnostics(_hass(), _Entry()))
+        self._assert_clean(diag)
+        self.assertTrue(diag["cloud_push"]["connected"])
+        self.assertEqual(diag["cloud_push"]["devices_seen"], ["12746", "17428"])
+
+    def test_cloud_push_absent(self) -> None:
+        diag = asyncio.run(
+            diagnostics.async_get_config_entry_diagnostics(_hass(push=False), _Entry())
+        )
+        self.assertIsNone(diag["cloud_push"])
+
     def test_live_data_not_mutated(self) -> None:
         hass = _hass()
         asyncio.run(diagnostics.async_get_config_entry_diagnostics(hass, _Entry()))
@@ -213,6 +238,7 @@ class DiagnosticsTest(unittest.TestCase):
         self.assertEqual([d["id"] for d in diag["devices"]], [12746])
         self.assertEqual(diag["local_channel"]["connected"], ["12746"])
         self.assertNotIn("unmatched_1", diag["local_channel"]["states"])
+        self.assertEqual(diag["cloud_push"]["devices_seen"], ["12746"])
 
     def test_log_redaction_covers_diagnostics_keys(self) -> None:
         # То, что скрыто в файле диагностики, не должно утекать через отладочный лог.

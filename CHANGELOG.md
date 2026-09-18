@@ -4,6 +4,39 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+- **Cloud push.** The integration now keeps the same live connection to the Atmeex cloud
+  that the vendor app uses (`wss://ws.iot.atmeex.com`). Readings arrive every few seconds
+  instead of every 30, and a change made in the app — or by Home Assistant itself — shows
+  up within a second. Nothing to configure on the network; on by default, can be turned off
+  in the options (`Cloud push`). Polling stays on as a fallback, and a device heard from
+  over push in the last minute is treated as online whatever the cloud's `online` flag
+  says. The endpoint is not in the vendor's Swagger; how it behaves was measured over a
+  three-hour recording: authorisation by the `Authorization` header only, the token
+  checked at the handshake only, a `{"type":"unauthorized"}` frame for an expired one, no
+  pings from the server, and occasional stalls and drops without a close frame. The
+  client uses aiohttp's heartbeat to notice a hung connection, reconnects with backoff,
+  and asks for a fresh token when the server rejects one.
+- **The command path switches without a reload.** Changing `Command path` in the options
+  now applies at once. Before, every option change reloaded the integration, which also
+  closed the local channel — the very connection `local_first` needs.
+
+### Fixed
+- **The integration reloaded itself every three hours.** Home Assistant calls a config
+  entry's update listener on any change to the entry, including saving refreshed tokens,
+  and the listener reloaded unconditionally. The access token lives three hours, so every
+  2 h 59 min all entities went `unavailable` for a fraction of a second, the local channel
+  dropped its device connections, and automations triggered by "came back from
+  unavailable" fired and sent commands to the cloud. Found by matching the entry's
+  `modified_at` against the moment of such a blip, then seen repeating at the same
+  interval for a day. The listener now reloads only when an option changes, other than the
+  command path, or when a newly detected unit feature needs new entities.
+
+### Changed
+- `iot_class` is now `cloud_push`.
+
 ## [0.7.0] — 2026-09-18
 
 A diagnostics download to attach to issues, and debug logs that no longer point at the
