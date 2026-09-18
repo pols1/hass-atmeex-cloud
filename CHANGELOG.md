@@ -4,7 +4,10 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [0.7.0] — 2026-09-18
+
+A diagnostics download to attach to issues, and debug logs that no longer point at the
+owner, the device or the home network.
 
 ### Added
 - **Diagnostics download.** The integration and each device now offer Home Assistant's
