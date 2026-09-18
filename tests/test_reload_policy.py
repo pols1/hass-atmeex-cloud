@@ -31,6 +31,7 @@ OPTIONS = {
     "write_mode": "cloud_first",
     "local_port": 3001,
 }
+DEFAULTS = {**OPTIONS, "cloud_push": True, "local_enabled": False}
 DATA = {
     "email": "user@example.com",
     "password": "secret",
@@ -76,9 +77,19 @@ class NeedsReloadTest(unittest.TestCase):
         new_options = {**OPTIONS, "write_mode": "local_first", "local_port": 3002}
         self.assertTrue(needs_reload(OPTIONS, new_options, DATA, DATA))
 
-    def test_new_option_key_reloads(self) -> None:
-        # Новая настройка, которой раньше не было в записи.
-        self.assertTrue(needs_reload(OPTIONS, {**OPTIONS, "cloud_push": False}, DATA, DATA))
+    def test_new_option_saved_with_its_default_does_not_reload(self) -> None:
+        # Так и было на живой системе: форма настроек при первом сохранении
+        # после обновления дописала cloud_push=True, и смена режима записи
+        # перезагрузила интеграцию.
+        new_options = {**OPTIONS, "cloud_push": True, "write_mode": "local_first"}
+        self.assertFalse(needs_reload(OPTIONS, new_options, DATA, DATA, DEFAULTS))
+
+    def test_new_option_saved_with_other_value_reloads(self) -> None:
+        new_options = {**OPTIONS, "cloud_push": False}
+        self.assertTrue(needs_reload(OPTIONS, new_options, DATA, DATA, DEFAULTS))
+
+    def test_without_defaults_a_new_key_counts_as_change(self) -> None:
+        self.assertTrue(needs_reload(OPTIONS, {**OPTIONS, "cloud_push": True}, DATA, DATA))
 
     def test_nothing_changed(self) -> None:
         self.assertFalse(needs_reload(OPTIONS, dict(OPTIONS), DATA, dict(DATA)))

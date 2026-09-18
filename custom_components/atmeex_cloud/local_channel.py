@@ -446,7 +446,14 @@ class AtmeexLocalChannel:
     async def _relay_upstream(
         self, up_reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
-        """Ответы облака — устройству, байт в байт."""
+        """Ответы облака — устройству, байт в байт.
+
+        С включённым отладочным логом заодно показывает команды облака: так
+        снимаются настоящие имена команд, которые приложение ни разу не
+        отправляло при записи трафика. Опрос get_state/get_setp не пишем —
+        он идёт каждые несколько секунд.
+        """
+        tail = ""
         try:
             while True:
                 chunk = await up_reader.read(READ_CHUNK)
@@ -454,10 +461,28 @@ class AtmeexLocalChannel:
                     break
                 writer.write(chunk)
                 await writer.drain()
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    tail = self._log_cloud_commands(tail + chunk.decode(errors="replace"))
         except (ConnectionError, asyncio.CancelledError):
             pass
         except Exception:  # noqa: BLE001
             _LOGGER.debug("Atmeex: обрыв ответного потока от облака", exc_info=True)
+
+    @staticmethod
+    def _log_cloud_commands(buf: str) -> str:
+        """Записать в отладочный лог команды облака; вернуть неразобранный хвост."""
+        objects, tail = split_json_objects(buf)
+        for raw in objects:
+            try:
+                frame = json.loads(raw)
+            except ValueError:
+                continue
+            cmd = frame.get("cmd") if isinstance(frame, dict) else None
+            if isinstance(cmd, dict) and not set(cmd) <= {"get_state", "get_setp"}:
+                _LOGGER.debug("Atmeex: облако -> устройство: %s", raw[:500])
+            elif isinstance(frame, dict) and "cmd" not in frame and "hello" not in frame:
+                _LOGGER.debug("Atmeex: облако -> устройство (не cmd): %s", raw[:500])
+        return tail if len(tail) < MAX_BUFFER else ""
 
     # ------------------------------------------------------------------
     # Отправка команд

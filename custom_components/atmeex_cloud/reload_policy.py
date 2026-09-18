@@ -26,8 +26,23 @@ LIVE_OPTIONS = frozenset({"write_mode"})
 RELOAD_DATA_KEYS = frozenset({"capabilities"})
 
 
-def changed_keys(before: Mapping[str, Any], after: Mapping[str, Any]) -> set[str]:
-    return {key for key in set(before) | set(after) if before.get(key) != after.get(key)}
+def changed_keys(
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    defaults: Mapping[str, Any] | None = None,
+) -> set[str]:
+    """Ключи, у которых изменилось действующее значение.
+
+    Отсутствующий ключ равен своему значению по умолчанию. Форма настроек
+    сохраняет все поля сразу, так что первое сохранение после обновления
+    дописывает новые поля с умолчаниями — это не изменение.
+    """
+    defaults = defaults or {}
+    return {
+        key
+        for key in set(before) | set(after)
+        if before.get(key, defaults.get(key)) != after.get(key, defaults.get(key))
+    }
 
 
 def needs_reload(
@@ -35,7 +50,8 @@ def needs_reload(
     new_options: Mapping[str, Any],
     old_data: Mapping[str, Any],
     new_data: Mapping[str, Any],
+    option_defaults: Mapping[str, Any] | None = None,
 ) -> bool:
-    if changed_keys(old_options, new_options) - LIVE_OPTIONS:
+    if changed_keys(old_options, new_options, option_defaults) - LIVE_OPTIONS:
         return True
     return bool(changed_keys(old_data, new_data) & RELOAD_DATA_KEYS)

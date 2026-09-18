@@ -28,6 +28,7 @@ from .const import (
     DEFAULT_LOCAL_ENABLED,
     DEFAULT_LOCAL_PORT,
     DOMAIN,
+    OPTION_DEFAULTS,
     PLATFORMS,
     PUSH_FRESH_SECONDS,
 )
@@ -404,7 +405,9 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         return
 
     snapshot = runtime.get("snapshot") or {"options": {}, "data": {}}
-    reload = needs_reload(snapshot["options"], entry.options, snapshot["data"], entry.data)
+    reload = needs_reload(
+        snapshot["options"], entry.options, snapshot["data"], entry.data, OPTION_DEFAULTS
+    )
     runtime["snapshot"] = _entry_snapshot(entry)
 
     if reload:

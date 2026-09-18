@@ -531,6 +531,26 @@ class TestCommanderPolicy(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(c.mode, "cloud_first")
 
 
+class TestCloudCommandLog(unittest.TestCase):
+    """Команды облака в отладочном логе — чтобы снять настоящие имена команд."""
+
+    def test_commands_are_logged_polling_is_not(self):
+        log = AtmeexLocalChannel._log_cloud_commands
+        hello = '{"hello":true,"id":"84:1F:E8:A5:D7:A0:0","time":"2026-08-16 18:51:30"}'
+        poll = '{"id":"84:1F:E8:A5:D7:A0:0","cmd":{"get_state":true}}'
+        command = '{"id":"84:1F:E8:A5:D7:A0:0","cmd":{"set_fan_speed":3}}'
+        stream = hello + poll + command
+        cut = len(hello + poll) + 20  # команда разрезана посередине
+        with self.assertLogs(_mod._LOGGER, level="DEBUG") as logs:
+            tail = log(stream[:cut])
+            self.assertEqual(tail, command[:20])
+            tail = log(tail + stream[cut:])
+        self.assertEqual(tail, "")
+        lines = [r.getMessage() for r in logs.records]
+        self.assertEqual(len(lines), 1)
+        self.assertIn('"set_fan_speed":3', lines[0])
+
+
 class TestSelfConnectionGuard(unittest.IsolatedAsyncioTestCase):
     """Подмена DNS действует и на сам Home Assistant.
 

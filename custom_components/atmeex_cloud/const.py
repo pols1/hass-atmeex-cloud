@@ -36,6 +36,18 @@ DEFAULT_CLOUD_PUSH = True
 # Сколько секунд состояние из push-канала считается свежим. Старше — верим опросу.
 PUSH_FRESH_SECONDS = 60
 
+# Умолчания всех настроек: отсутствующая в записи настройка равна своему
+# умолчанию (см. reload_policy.py).
+OPTION_DEFAULTS = {
+    CONF_CO2_SENSOR: DEFAULT_CAP_MODE,
+    CONF_HUMIDIFIER: DEFAULT_CAP_MODE,
+    "enable_cool": False,
+    CONF_CLOUD_PUSH: DEFAULT_CLOUD_PUSH,
+    CONF_LOCAL_ENABLED: DEFAULT_LOCAL_ENABLED,
+    CONF_LOCAL_PORT: DEFAULT_LOCAL_PORT,
+    CONF_WRITE_MODE: DEFAULT_WRITE_MODE,
+}
+
 # Логгер интеграции (его импортируют climate/fan/select)
 LOGGER = logging.getLogger(__package__)
 
