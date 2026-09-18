@@ -9,6 +9,8 @@ from typing import Any, Callable, Optional
 
 import aiohttp
 
+from .redact import redact, redact_body
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -112,16 +114,16 @@ class AtmeexApi:
 
         async with self._session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
             text = await resp.text()
-            _LOGGER.debug("Atmeex auth response: status=%s, body=%s", resp.status, text[:1000])
+            _LOGGER.debug("Atmeex auth response: status=%s, body=%s", resp.status, redact_body(text, 1000))
 
             if resp.status != 200:
-                raise ApiAuthError(f"signin failed {resp.status}: {text[:500]}")
+                raise ApiAuthError(f"signin failed {resp.status}: {redact_body(text, 500)}")
 
             data = json.loads(text)
             access = data.get("access_token")
             refresh = data.get("refresh_token")
             if not access or not refresh:
-                raise ApiAuthError(f"signin: missing tokens: {data}")
+                raise ApiAuthError(f"signin: missing tokens: {redact(data)}")
 
             self._set_tokens(access, refresh)
             _LOGGER.info("Atmeex: authenticated, token_type=Bearer, expires_in=None (JWT exp is handled by server)")
@@ -143,17 +145,17 @@ class AtmeexApi:
 
         async with self._session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
             text = await resp.text()
-            _LOGGER.debug("Atmeex refresh response: status=%s, body=%s", resp.status, text[:1000])
+            _LOGGER.debug("Atmeex refresh response: status=%s, body=%s", resp.status, redact_body(text, 1000))
 
             if resp.status != 200:
                 # refresh умер → нужна реавторизация руками
-                raise ApiAuthError(f"refresh failed {resp.status}: {text[:500]}")
+                raise ApiAuthError(f"refresh failed {resp.status}: {redact_body(text, 500)}")
 
             data = json.loads(text)
             access = data.get("access_token")
             refresh = data.get("refresh_token") or self._refresh_token
             if not access or not refresh:
-                raise ApiAuthError(f"refresh: missing tokens: {data}")
+                raise ApiAuthError(f"refresh: missing tokens: {redact(data)}")
 
             self._set_tokens(access, refresh)
 
@@ -206,7 +208,7 @@ class AtmeexApi:
             timeout=aiohttp.ClientTimeout(total=30),
         ) as resp:
             text = await resp.text()
-            _LOGGER.debug("Atmeex API response: %s %s -> %s, body=%s", method, path, resp.status, text[:1000])
+            _LOGGER.debug("Atmeex API response: %s %s -> %s, body=%s", method, path, resp.status, redact_body(text, 1000))
 
             # если токен протух/отозван — пробуем 1 раз обновить и повторить
             if resp.status in (401, 403):
@@ -221,10 +223,10 @@ class AtmeexApi:
                         json_data=json_data,
                         _retry=False,
                     )
-                raise ApiAuthError(f"{method} {path} unauthorized {resp.status}: {text[:200]}")
+                raise ApiAuthError(f"{method} {path} unauthorized {resp.status}: {redact_body(text, 200)}")
 
             if resp.status >= 400:
-                raise ApiError(f"{method} {path} failed {resp.status}: {text[:500]}")
+                raise ApiError(f"{method} {path} failed {resp.status}: {redact_body(text, 500)}")
 
             if not text:
                 return None
@@ -246,7 +248,7 @@ class AtmeexApi:
         # иногда сервер может вернуть {"devices":[...]} — подстрахуемся
         if isinstance(data, dict) and isinstance(data.get("devices"), list):
             return data["devices"]
-        raise ApiError(f"Unexpected devices payload: {type(data)} {data}")
+        raise ApiError(f"Unexpected devices payload: {type(data)} {redact(data)}")
 
     async def set_device_params(self, device_id: int | str, **params: Any) -> Any:
         """

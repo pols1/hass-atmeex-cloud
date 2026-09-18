@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Security
+- **Debug logging wrote live tokens into home-assistant.log.** With debug enabled for the
+  integration — the usual first step when filing a bug — the raw `/auth/signin` response
+  was logged for both the password sign-in and the refresh-token path, `access_token` and
+  `refresh_token` included, so a log pasted into an issue handed over the account. Every
+  response body the API client logs or puts into an error message now goes through
+  redaction first: token, password and email values become `**REDACTED**`, keys and other
+  fields stay, so the log still shows what the server sent. The "missing tokens" error no
+  longer prints the one token that did arrive. If you have shared a debug log before,
+  treat the tokens in it as exposed and change the Atmeex account password (whether the
+  cloud also revokes tokens issued before the change is not documented).
+
 ## [0.6.1] — 2026-08-20
 
 Four fixes found by looking at what the entities actually showed on a live install,
