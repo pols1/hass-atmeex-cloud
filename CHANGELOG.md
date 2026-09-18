@@ -4,7 +4,9 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [0.6.2] — 2026-09-18
+
+A security fix: debug logs no longer carry the account's tokens.
 
 ### Security
 - **Debug logging wrote live tokens into home-assistant.log.** With debug enabled for the
