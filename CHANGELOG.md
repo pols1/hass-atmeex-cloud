@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+- **Diagnostics download.** The integration and each device now offer Home Assistant's
+  "Download diagnostics": config entry data and options, coordinator status, the device
+  payload from the cloud and, when the local channel is on, what it currently holds per
+  device. Meant to be attached to issues instead of a debug log. Credentials (email,
+  password, access and refresh token) are redacted, and so is anything that points at a
+  person or a place: `owner_id`, `user_id`, `phone`, the device MAC and `network_name` —
+  the Wi-Fi network the unit is connected to. The local channel keys its data by MAC, so
+  in the download it is keyed by the cloud device id instead.
+
 ## [0.6.2] — 2026-09-18
 
 A security fix: debug logs no longer carry the account's tokens.

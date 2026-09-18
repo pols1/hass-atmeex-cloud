@@ -5,8 +5,8 @@
 в issue — значит, ни одно значение токена или пароля туда попадать не должно.
 Ключи оставляем: по ним видно, что сервер вообще прислал.
 
-Если появится diagnostics.py, он обязан вымарывать те же SENSITIVE_KEYS
-(как минимум email, password, access_token, refresh_token).
+Диагностика (diagnostics.py) закрывает свой набор TO_REDACT штатным
+async_redact_data — он шире: там ещё MAC, owner_id и имя Wi-Fi сети.
 
 Модуль не зависит ни от homeassistant, ни от aiohttp, поэтому тестируется
 на голом Python.
