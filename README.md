@@ -5,13 +5,15 @@
 ## Overview
 
 Atmeex Cloud is a custom integration for [Home Assistant](https://www.home-assistant.io/) that connects your Atmeex (AirNanny) ventilation devices to the Home Assistant ecosystem.
-It uses the official Atmeex Cloud REST API (https://api.iot.atmeex.com) to provide reliable control and monitoring of your brizers directly from Home Assistant dashboards and automations.
+It uses the official Atmeex Cloud REST API (https://api.iot.atmeex.com) for control, and the same live WebSocket connection the vendor app uses (`wss://ws.iot.atmeex.com`) for updates — readings arrive every few seconds and changes made in the app show up at once, with nothing to set up on the network.
 
 🧩 Written and maintained by Sergei Polunovskii: an own API client against the current
 Atmeex Cloud REST API, built for current Home Assistant releases.
 
 ## Features
 *   Auto-discovery of all devices linked to your Atmeex Cloud account.
+*   **Live updates** over the vendor's cloud WebSocket: readings every few seconds, app-side
+    changes within a second. Polling stays on as a fallback.
 *   Power on/off control.
 *   Fan speed control (1–7).
 *   Operation modes: ventilation, recirculation, mixed, and fresh-air intake.
@@ -19,7 +21,7 @@ Atmeex Cloud REST API, built for current Home Assistant releases.
 *   Humidifier control on the trims that have one, detected automatically.
 *   **Climate Presets**: Support for Auto and Sleep modes.
 *   **Optional Cool Mode**: You can optionally enable cooling mode (`HVACMode.COOL`) from the integration settings if your climate complex supports it.
-*   **Sensors**: indoor and outdoor temperature always; CO₂ and room humidity on the trims
+*   **Sensors**: intake and room temperature always; CO₂ and room humidity on the trims
     that actually have those parts — the integration works out which (see Options).
 *   **Config Flow Re-authentication**: Seamlessly handles expired cloud tokens by prompting re-login natively in HA.
 *   Online/offline status displayed directly on the climate card.
@@ -55,7 +57,8 @@ into your Home Assistant configuration directory:
 3. Enter your Atmeex account credentials (email and password).
 4. After successful login, all connected devices will appear automatically.
 
-The integration uses an internal update coordinator with a 30-second polling interval.
+The cloud is polled every 30 seconds as a fallback; with **Cloud push** on (the default)
+readings arrive every few seconds between polls.
 
 ## Options
 
@@ -88,6 +91,21 @@ to override — for a faulty sensor, or a non-standard build.
 **Cool mode** stays manual: the A7 line does not cool, the option exists for other Atmeex
 climate units.
 
+### Cloud push
+
+On by default. The integration keeps a live WebSocket to `wss://ws.iot.atmeex.com`, the
+connection the vendor app uses. The server sends a snapshot of every unit on connect, then
+each unit's state about every five seconds and every setpoint change — from the app or from
+Home Assistant itself — within a second. A unit heard from in the last minute counts as
+online whatever the cloud's `online` flag says.
+
+The endpoint is not in the vendor's API documentation; its behaviour was measured over a
+three-hour recording. The server never pings and occasionally stalls or drops the
+connection without a close frame, so the client pings every 30 seconds of silence,
+reconnects with backoff, and fetches a fresh token when the server rejects one. If it cannot
+connect, nothing breaks — polling carries on. Turn it off here if you would rather not keep
+the connection open.
+
 ### Command path
 
 * `cloud_first` (default) — commands go through the cloud, falling back to the local channel
@@ -98,6 +116,9 @@ climate units.
 
 Cloud-first is the default for consistency rather than reliability: the vendor app reads
 state from the cloud, so writing past it would let the two views drift apart.
+
+Changing the command path applies at once, without reloading the integration — a reload
+would close the local channel, the very connection `local_first` relies on.
 
 ## Compatibility
 
@@ -139,21 +160,30 @@ The brizers do not listen on any port — verified by a full TCP scan (1–10000
 `ws.iot.atmeex.com:3001` and talks plain JSON over it, with no TLS. So local access means
 being on the receiving end of that connection, not connecting to the device.
 
+**Since Cloud push most installs do not need this.** Live updates now come from the cloud
+without touching the network. The local channel is for two things push cannot do: keeping
+a unit reachable while the vendor's cloud is down, and sending commands straight to the
+device.
+
 With **Local channel** enabled, Home Assistant listens on port 3001 and **forwards
 everything to the Atmeex cloud unchanged** — the vendor app keeps working, and the
-integration additionally reads the live stream. That stream carries a `state` frame every
-few seconds, so entities update in near real time instead of waiting for the 30-second
-cloud poll, and it exposes room humidity and the humidifier's water-tank flag.
+integration additionally reads the device's own stream, a `state` frame every few seconds.
 
 If the cloud is unreachable, the channel answers the device itself — the device stays silent
-until the server acknowledges its `hello` with a time sync — so readings keep coming through
-a vendor outage. Once the cloud returns, the session is dropped so the device reconnects
-through a proxied one.
+until the server acknowledges its `hello` with a time sync. Once the cloud returns, the
+session is dropped so the device reconnects through a proxied one. Before 0.8.0 the channel's
+replies lacked the line ending the firmware waits for (see below), so this standalone mode
+most likely never woke a device; it is fixed now but has not yet been seen through a real
+vendor outage.
 
-Commands can also travel this way; see **Command path** under Options. Only `set_pwr_on`,
-`set_fan_speed` and `set_cool_mode` were observed on the wire during the capture — the names
-for damper, temperature and humidity stage are inferred from the setpoint fields and are
-marked as such in the code.
+Commands can also travel this way; see **Command path** under Options. The cloud terminates
+every frame it sends to the device with a newline, while the device writes to the cloud with
+no separator at all; until 0.8.0 the channel sent its commands without that newline and the
+unit ignored them. Confirmed on a live unit: `set_damp_pos` sent over the local channel. The
+cloud itself was seen sending `set_pwr_on`, `set_fan_speed`, `set_cool_mode`, `set_damp_pos`
+and `set_hum_stg`; `set_temp_room`, `set_auto` and `set_night` are still inferred from the
+setpoint names. A unit that is off with an empty tank refuses a humidification stage from
+the cloud and locally alike.
 
 ### Redirecting the traffic
 
@@ -217,12 +247,13 @@ wait out a typical restart, probe the port again, and disable the rules only if 
 dead. The cost is honest — during a genuine outage the redirect now survives a couple of
 minutes longer, so a device reconnecting in that window fails once before falling back.
 
-**Restarting Home Assistant costs you the channel for a while.** The guard polls every
-thirty seconds, so a restart that takes a couple of minutes is long enough for it to
-disable the redirect — and the devices, having reconnected straight to the vendor, stay
-there until their next reconnect, which can be a day away. Nothing breaks; the local
-channel is simply idle in the meantime. Plan updates accordingly, or power-cycle a device
-if you want it back immediately.
+**A Home Assistant restart can cost you the channel for a while.** If the guard disables
+the redirect during a restart, the devices reconnect straight to the vendor and stay there
+until their next reconnect, which can be a day away. In practice it varies: in September
+2026, on the install this was written against, a unit came back to the channel within a few
+minutes after each of five restarts in a row. Whether that was the re-check above or the
+unit's own reconnect timing was not pinned down. Nothing breaks either way; the local
+channel is simply idle until the device returns.
 
 ### What to expect during the switch
 

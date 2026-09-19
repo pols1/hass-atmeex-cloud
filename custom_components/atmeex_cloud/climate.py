@@ -136,6 +136,11 @@ class AtmeexClimateEntity(CoordinatorEntity, ClimateEntity):
     _attr_target_temperature_step = 0.5
     _attr_min_temp = 10
     _attr_max_temp = 30
+    # Ступени увлажнения 0..3 показываются как 0/33/66/100 %. Умолчания HA
+    # (30..99) делали ступень 0 — «увлажнение выключено» — недостижимой:
+    # set_humidity(0) отвергался ещё до интеграции.
+    _attr_min_humidity = 0
+    _attr_max_humidity = 100
 
     _attr_fan_modes = FAN_MODES
     _attr_swing_modes = BRIZER_SWING_MODES

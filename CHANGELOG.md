@@ -32,10 +32,30 @@ versioning follows [Semantic Versioning](https://semver.org/).
   unavailable" fired and sent commands to the cloud. Found by matching the entry's
   `modified_at` against the moment of such a blip, then seen repeating at the same
   interval for a day. The listener now reloads only when an option changes, other than the
-  command path, or when a newly detected unit feature needs new entities.
+  command path, or when a newly detected unit feature needs new entities. An option missing
+  from the stored entry counts as its default, so the first save after an upgrade, which
+  writes every field, does not trigger a reload by itself. Confirmed on the live install:
+  sixteen hours and several token refreshes without a single blip.
+- **Commands over the local channel were never executed.** The cloud ends every frame it
+  sends to the device with a newline; the device writes to the cloud with no separator at
+  all, and the protocol notes had generalised that to both directions. The channel sent its
+  commands without the newline, and the unit ignored them — `set_damp_pos` was seen being
+  refused over the local channel while the byte-identical cloud frame worked. Every frame
+  now ends with a newline and goes out on its own, and `set_damp_pos` works locally on a
+  live unit. The same missing newline was in the channel's reply to the device's `hello`, so
+  its standalone mode (answering the device while the cloud is down) most likely never woke
+  a device either; that is fixed too, but has not been seen through a real outage yet.
+- **Humidification could not be switched off from Home Assistant.** Stages 0–3 are shown as
+  0/33/66/100 %, but the climate entity kept Home Assistant's default humidity range of
+  30–99, so a target of 0 was rejected before it reached the integration.
 
 ### Changed
 - `iot_class` is now `cloud_push`.
+- The local channel no longer asks for `get_setp`/`get_state` after a command: the cloud does
+  not either, and the unit reports its setpoints in reply to a command and its state every
+  few seconds anyway.
+- With debug logging on, the local channel logs the cloud's commands to the device (polling
+  excluded) — that is how the real command names were captured.
 
 ## [0.7.0] — 2026-09-18
 
