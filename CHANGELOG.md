@@ -4,7 +4,11 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## [0.8.0] — 2026-09-19
+
+Live updates from the vendor's cloud WebSocket with nothing to set up on the network; the
+integration no longer reloads itself every three hours; and commands over the local
+channel finally reach the device.
 
 ### Added
 - **Cloud push.** The integration now keeps the same live connection to the Atmeex cloud
