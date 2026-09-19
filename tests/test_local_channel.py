@@ -428,8 +428,9 @@ class TestLocalCommands(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("u_something_new", json.dumps(cmds))
 
     async def test_each_command_is_its_own_write_with_nothing_attached(self):
-        # Прошивка игнорировала команду, склеенную в одном пакете с другими
-        # объектами. Каждая запись в сокет — ровно один JSON-объект.
+        # Каждая запись в сокет — ровно один JSON-объект, завершённый \n:
+        # так пишет облако, и без перевода строки устройство команду не
+        # выполняло.
         writes = []
 
         class RecordingWriter:
@@ -457,8 +458,10 @@ class TestLocalCommands(unittest.IsolatedAsyncioTestCase):
             ],
         )
         for w in writes:
-            objects, tail = split_json_objects(w)
-            self.assertEqual((len(objects), tail), (1, ""))
+            self.assertTrue(w.endswith("}\n"), repr(w))
+            self.assertEqual(w.count("\n"), 1)
+            objects, _ = split_json_objects(w)
+            self.assertEqual(len(objects), 1)
 
     async def test_is_connected_tracks_the_session(self):
         self.assertTrue(self.channel.is_connected(MAC))
