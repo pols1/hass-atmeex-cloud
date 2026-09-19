@@ -58,9 +58,10 @@ UPSTREAM_RETRY_INTERVAL = 60
 # {"id", ответы облака — с {"hello" (синхронизация времени) либо тоже с {"id".
 FRAME_PREFIXES = ('{"id"', '{"hello"')
 
-# Уставка из облачного API -> команда канала. Наблюдались в перехвате
-# set_pwr_on, set_fan_speed и set_cool_mode; остальные выведены по симметрии
-# имён и подтверждаются первой же удачной локальной записью.
+# Уставка из облачного API -> команда канала. Облако само шлёт устройству
+# set_pwr_on, set_fan_speed, set_cool_mode (перехват 16.08.2026) и
+# set_damp_pos (отладочный лог канала, 19.09.2026). Остальные выведены по
+# симметрии имён и не наблюдались.
 CMD_BY_PARAM = {
     "u_pwr_on": "set_pwr_on",
     "u_fan_speed": "set_fan_speed",
@@ -72,6 +73,10 @@ CMD_BY_PARAM = {
     "u_cool_mode": "set_cool_mode",
 }
 READ_CHUNK = 65536
+# Пауза между командами одного вызова. Облако шлёт каждую команду отдельным
+# пакетом, и прошивка, похоже, разбирает один объект на одно чтение: команда,
+# склеенная в пакете с другими, игнорировалась (заметки протокола, 19.09.2026).
+COMMAND_GAP = 0.3
 # Дальше этого размера буфер не растёт: если мы не смогли собрать объект,
 # значит поток рассинхронизирован и копить бесполезно.
 MAX_BUFFER = 1 << 20
@@ -512,27 +517,27 @@ class AtmeexLocalChannel:
                 ", ".join(sorted(unknown)),
             )
 
+        # Каждая команда — отдельной записью с ожиданием отправки, как это
+        # делает облако. Раньше команды уходили одним пакетом вместе с
+        # get_setp и get_state, и устройство такой пакет игнорировало. Просить
+        # отчёт не нужно: состояние устройство шлёт само каждые ~5 секунд.
         sent = False
         for key, value in params.items():
             cmd = CMD_BY_PARAM.get(key)
             if cmd is None or value is None:
                 continue
+            if sent:
+                await asyncio.sleep(COMMAND_GAP)
             self._send(writer, {"id": device_id, "cmd": {cmd: value}})
+            try:
+                await writer.drain()
+            except OSError as err:
+                _LOGGER.warning("Atmeex: не удалось отправить команду локально: %s", err)
+                return False
             sent = True
             _LOGGER.debug("Atmeex: локально -> %s = %r (%s)", cmd, value, mac)
 
-        if not sent:
-            return False
-
-        # Просим устройство отчитаться, чтобы не ждать очередной телеметрии.
-        self._send(writer, {"id": device_id, "cmd": {"get_setp": True}})
-        self._send(writer, {"id": device_id, "cmd": {"get_state": True}})
-        try:
-            await writer.drain()
-        except OSError as err:
-            _LOGGER.warning("Atmeex: не удалось отправить команду локально: %s", err)
-            return False
-        return True
+        return sent
 
     # ------------------------------------------------------------------
     # Разбор кадров

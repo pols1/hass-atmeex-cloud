@@ -407,15 +407,11 @@ class TestLocalCommands(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(ok)
 
-        frames = await self._receive(4)  # две команды + get_setp + get_state
+        frames = await self._receive(2)
         cmds = [f["cmd"] for f in frames]
-        self.assertIn({"set_pwr_on": True}, cmds)
-        self.assertIn({"set_fan_speed": 4}, cmds)
+        self.assertEqual(cmds, [{"set_pwr_on": True}, {"set_fan_speed": 4}])
         # адресация обязана быть той же, что использует облако
         self.assertTrue(all(f["id"] == DEVICE_ID for f in frames))
-        # после записи просим устройство отчитаться, а не ждём телеметрии
-        self.assertIn({"get_setp": True}, cmds)
-        self.assertIn({"get_state": True}, cmds)
 
     async def test_refuses_when_device_is_not_connected(self):
         self.assertFalse(
@@ -427,9 +423,42 @@ class TestLocalCommands(unittest.IsolatedAsyncioTestCase):
             MAC, {"u_fan_speed": 2, "u_something_new": 5}
         )
         self.assertTrue(ok, "известный параметр должен уйти несмотря на неизвестный")
-        cmds = [f["cmd"] for f in await self._receive(3)]
-        self.assertIn({"set_fan_speed": 2}, cmds)
+        cmds = [f["cmd"] for f in await self._receive(1)]
+        self.assertEqual(cmds, [{"set_fan_speed": 2}])
         self.assertNotIn("u_something_new", json.dumps(cmds))
+
+    async def test_each_command_is_its_own_write_with_nothing_attached(self):
+        # Прошивка игнорировала команду, склеенную в одном пакете с другими
+        # объектами. Каждая запись в сокет — ровно один JSON-объект.
+        writes = []
+
+        class RecordingWriter:
+            def write(self, data):
+                writes.append(data.decode())
+
+            async def drain(self):
+                pass
+
+        self.channel._sessions[MAC] = (RecordingWriter(), DEVICE_ID)
+        original_gap = _mod.COMMAND_GAP
+        _mod.COMMAND_GAP = 0
+        try:
+            ok = await self.channel.async_send_params(
+                MAC, {"u_damp_pos": 1, "u_hum_stg": 2}
+            )
+        finally:
+            _mod.COMMAND_GAP = original_gap
+        self.assertTrue(ok)
+        self.assertEqual(
+            [json.loads(w) for w in writes],
+            [
+                {"id": DEVICE_ID, "cmd": {"set_damp_pos": 1}},
+                {"id": DEVICE_ID, "cmd": {"set_hum_stg": 2}},
+            ],
+        )
+        for w in writes:
+            objects, tail = split_json_objects(w)
+            self.assertEqual((len(objects), tail), (1, ""))
 
     async def test_is_connected_tracks_the_session(self):
         self.assertTrue(self.channel.is_connected(MAC))
