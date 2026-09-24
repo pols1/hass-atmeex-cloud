@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] — 2026-09-24
+
+### Fixed
+- **0.8.1 cut healthy sessions.** Its watchdog treated two minutes of silence from the
+  cloud as a dead link. The threshold came from a captured session where the longest such
+  gap was 8.1 s — but that capture was made of short connections, in which the cloud speaks
+  right after connect. On a live long-lived session the cloud stayed silent for over two
+  minutes at a time, so the watchdog dropped the device every few minutes. Silence is now
+  only a distant backstop (15 minutes).
+- **A dead link is detected by what the cloud knows, not by its silence.** Every state frame
+  carries a timestamp set by the unit itself, and the cloud stores that same timestamp. When
+  a unit is on the local channel and its frames keep arriving while the cloud's copy stops
+  advancing — more than five minutes apart — the channel is not passing the stream on. The
+  session is dropped with a warning and the unit reconnects through a fresh link. This is
+  the comparison that found the original fault by hand.
+
 ## [0.8.1] — 2026-09-24
 
 ### Fixed

@@ -32,7 +32,7 @@ from .const import (
     PLATFORMS,
     PUSH_FRESH_SECONDS,
 )
-from .data_merge import payload_differs
+from .data_merge import cloud_lags_behind_device, payload_differs
 from .local_channel import AtmeexLocalChannel, normalize_mac
 from .reload_policy import RELOAD_DATA_KEYS, needs_reload
 
@@ -121,6 +121,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         channel = channels.get("local")
         if channel is not None:
+            # Канал может держать устройство, перестав доносить его поток до
+            # облака: показания идут, а команды оттуда теряются (24.09.2026 —
+            # двое суток незамеченной аварии). Сравниваем метку кадра,
+            # которую сохранило облако, с меткой кадра, пришедшего к нам:
+            # обе ставит само устройство.
+            for dev in devices:
+                if not isinstance(dev, dict):
+                    continue
+                mac = normalize_mac(dev.get("mac") or "")
+                if not mac or not channel.connected.get(mac):
+                    continue
+                lag = cloud_lags_behind_device(
+                    dev.get("condition"), channel.states.get(mac)
+                )
+                if lag is None:
+                    continue
+                _LOGGER.warning(
+                    "Atmeex: облако отстало на %d с по устройству %s — "
+                    "канал не доносит до него поток. Разрываю сессию, чтобы "
+                    "бризер переподключился",
+                    lag,
+                    dev.get("id"),
+                )
+                hass.async_create_task(channel.drop_session(mac))
+
             # Устройство, которое прямо сейчас держит с нами соединение,
             # офлайном быть не может — что бы ни думало облако. Без этого
             # доступность мигала: локальный кадр поднимал сущность, опрос

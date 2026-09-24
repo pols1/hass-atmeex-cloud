@@ -373,6 +373,44 @@ class TestStandaloneRecovery(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class TestCloudLagDetection(unittest.TestCase):
+    """Отставание снимка в облаке — признак того, что канал ведёт в никуда."""
+
+    def setUp(self):
+        self.dm = _load("data_merge")
+
+    def test_lag_beyond_limit_is_reported(self):
+        lag = self.dm.cloud_lags_behind_device(
+            {"time": "2026-09-24 10:20:00"}, {"time": "2026-09-24 10:26:00"}
+        )
+        self.assertEqual(lag, 360.0)
+
+    def test_small_lag_is_normal(self):
+        self.assertIsNone(
+            self.dm.cloud_lags_behind_device(
+                {"time": "2026-09-24 10:25:50"}, {"time": "2026-09-24 10:26:00"}
+            )
+        )
+
+    def test_cloud_ahead_is_not_a_lag(self):
+        self.assertIsNone(
+            self.dm.cloud_lags_behind_device(
+                {"time": "2026-09-24 10:26:00"}, {"time": "2026-09-24 10:20:00"}
+            )
+        )
+
+    def test_missing_or_broken_timestamps_are_ignored(self):
+        cases = [
+            (None, {"time": "2026-09-24 10:26:00"}),
+            ({"time": "2026-09-24 10:20:00"}, None),
+            ({"time": "вчера"}, {"time": "2026-09-24 10:26:00"}),
+            ({}, {}),
+        ]
+        for cloud, local in cases:
+            with self.subTest(cloud=cloud, local=local):
+                self.assertIsNone(self.dm.cloud_lags_behind_device(cloud, local))
+
+
 class TestDeadUpstreamIsNoticed(unittest.IsolatedAsyncioTestCase):
     """Молчащее облако обязано разорвать сессию устройства.
 
@@ -459,6 +497,30 @@ class TestDeadUpstreamIsNoticed(unittest.IsolatedAsyncioTestCase):
                 reader, "сессия не разорвана, хотя облако закрыло соединение"
             )
         self.assertTrue(any("закрыло" in r.getMessage() for r in logs.records))
+
+    async def test_drop_session_disconnects_the_device(self):
+        async def quiet_cloud(r, w):
+            with contextlib.suppress(Exception):
+                while await r.read(4096):
+                    pass
+
+        await self._cloud(quiet_cloud)
+        channel = await self._channel()
+        reader, _ = await self._device(channel)
+        for _ in range(100):
+            if channel.connected.get(MAC):
+                break
+            await asyncio.sleep(0.05)
+        self.assertTrue(channel.connected.get(MAC), "устройство не опознано")
+
+        with self.assertLogs(_mod._LOGGER, level="WARNING"):
+            await channel.drop_session(MAC)
+        await self._assert_disconnected(reader, "drop_session не разорвал сессию")
+
+    async def test_drop_session_of_unknown_device_is_harmless(self):
+        await self._cloud(lambda r, w: asyncio.sleep(0))
+        channel = await self._channel()
+        await channel.drop_session("00:00:00:00:00:00")
 
     async def test_cloud_frames_are_timestamped_per_device(self):
         async def talking_cloud(r, w):
