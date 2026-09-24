@@ -373,6 +373,113 @@ class TestStandaloneRecovery(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class TestDeadUpstreamIsNoticed(unittest.IsolatedAsyncioTestCase):
+    """Молчащее облако обязано разорвать сессию устройства.
+
+    22.09.2026 встречное соединение умерло беззвучно: бризер остался на
+    канале, показания шли, а команды облака — в том числе расписание — до
+    него не доходили двое суток, и ни одна строка лога об этом не сказала.
+    """
+
+    PORT = 13906
+    UPSTREAM_PORT = 13907
+
+    async def _cloud(self, handler):
+        server = await asyncio.start_server(handler, "127.0.0.1", self.UPSTREAM_PORT)
+
+        async def stop():
+            server.close()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(server.wait_closed(), timeout=2)
+
+        self.addAsyncCleanup(stop)
+        return server
+
+    async def _device(self, channel):
+        reader, writer = await asyncio.open_connection("127.0.0.1", self.PORT)
+        self.addCleanup(writer.close)
+        writer.write(HELLO.encode())
+        await writer.drain()
+        return reader, writer
+
+    async def _channel(self):
+        channel = AtmeexLocalChannel(
+            port=self.PORT, upstream=("127.0.0.1", self.UPSTREAM_PORT)
+        )
+        await channel.async_start()
+        # Ждём остановку: иначе следующий тест не займёт тот же порт.
+        self.addAsyncCleanup(channel.async_stop)
+        return channel
+
+    async def _assert_disconnected(self, reader, message):
+        for _ in range(100):
+            if reader.at_eof():
+                return
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(reader.read(1), timeout=0.1)
+        self.fail(message)
+
+    async def test_silent_cloud_drops_the_session(self):
+        _mod.UPSTREAM_SILENCE_TIMEOUT = 0.3  # не ждать две минуты в тесте
+        self.addCleanup(setattr, _mod, "UPSTREAM_SILENCE_TIMEOUT", 120)
+
+        seen = asyncio.Event()
+
+        async def mute_cloud(r, w):
+            # Принимаем поток устройства и не отвечаем ни байтом.
+            seen.set()
+            with contextlib.suppress(Exception):
+                while await r.read(4096):
+                    pass
+
+        await self._cloud(mute_cloud)
+        channel = await self._channel()
+        reader, _ = await self._device(channel)
+        await asyncio.wait_for(seen.wait(), timeout=5)
+
+        with self.assertLogs(_mod._LOGGER, level="WARNING") as logs:
+            await self._assert_disconnected(
+                reader, "сессия не разорвана, хотя облако молчит"
+            )
+        self.assertTrue(
+            any("молчит" in r.getMessage() for r in logs.records),
+            f"в логе нет причины разрыва: {[r.getMessage() for r in logs.records]}",
+        )
+
+    async def test_upstream_eof_drops_the_session(self):
+        async def closing_cloud(r, w):
+            await r.read(1)  # дождаться первого кадра и уйти
+            w.close()
+
+        await self._cloud(closing_cloud)
+        channel = await self._channel()
+        reader, _ = await self._device(channel)
+        with self.assertLogs(_mod._LOGGER, level="WARNING") as logs:
+            await self._assert_disconnected(
+                reader, "сессия не разорвана, хотя облако закрыло соединение"
+            )
+        self.assertTrue(any("закрыло" in r.getMessage() for r in logs.records))
+
+    async def test_cloud_frames_are_timestamped_per_device(self):
+        async def talking_cloud(r, w):
+            await r.read(1)
+            w.write(b'{"hello":true,"id":"' + DEVICE_ID.encode() + b'"}\n')
+            await w.drain()
+            with contextlib.suppress(Exception):
+                while await r.read(4096):
+                    pass
+
+        await self._cloud(talking_cloud)
+        channel = await self._channel()
+        await self._device(channel)
+
+        for _ in range(100):
+            if channel.upstream_seen.get(MAC):
+                break
+            await asyncio.sleep(0.05)
+        self.assertIn(MAC, channel.upstream_seen, "не отмечено время кадра от облака")
+
+
 class TestLocalCommands(unittest.IsolatedAsyncioTestCase):
     """Отправка команд в устройство по локальному каналу."""
 

@@ -35,6 +35,7 @@ import contextlib
 import json
 import logging
 import socket
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -54,6 +55,16 @@ STOP_TIMEOUT = 5
 # устройство автономно. Бризер держит соединение сутками, поэтому без
 # этой проверки авария у вендора превращалась бы в вечную изоляцию.
 UPSTREAM_RETRY_INTERVAL = 60
+# Сколько терпеть тишину от облака, прежде чем считать встречное соединение
+# мёртвым. Облако само опрашивает устройство: в записи 16.08.2026 (66
+# соединений, 206 интервалов) самая долгая пауза между его кадрами — 8,1 с,
+# длиннее минуты нет ни одной. Отсюда пятнадцатикратный запас.
+#
+# Зачем вообще: 22.09.2026 встречное соединение умерло молча. Устройство
+# продолжало обслуживаться, показания шли, в логе ни строки — но облако
+# бризера больше не видело, и команды оттуда (в том числе расписание) до
+# него не доходили двое суток.
+UPSTREAM_SILENCE_TIMEOUT = 120
 # Опора для ресинхронизации потока: кадры устройства всегда начинаются с
 # {"id", ответы облака — с {"hello" (синхронизация времени) либо тоже с {"id".
 FRAME_PREFIXES = ('{"id"', '{"hello"')
@@ -189,6 +200,9 @@ class AtmeexLocalChannel:
         self.states: dict[str, dict[str, Any]] = {}
         self.setpoints: dict[str, dict[str, Any]] = {}
         self.connected: dict[str, bool] = {}
+        # Когда от облака последний раз приходил хоть какой-то кадр, по
+        # устройствам. Монотонные часы: нужен возраст, а не дата.
+        self.upstream_seen: dict[str, float] = {}
 
     @property
     def port(self) -> int:
@@ -264,6 +278,9 @@ class AtmeexLocalChannel:
         relay: asyncio.Task | None = None
         mac: str | None = None
         upstream_tried = False
+        # Общее состояние сессии: сторож тишины узнаёт из него MAC, который
+        # становится известен только с первого кадра устройства.
+        session: dict[str, Any] = {"mac": None}
 
         buf = ""
         try:
@@ -279,7 +296,7 @@ class AtmeexLocalChannel:
                     up_reader, up_writer = await self._connect_upstream()
                     if up_writer is not None:
                         relay = asyncio.create_task(
-                            self._relay_upstream(up_reader, writer)
+                            self._relay_upstream(up_reader, writer, session)
                         )
                     elif self._upstream is not None:
                         relay = asyncio.create_task(
@@ -309,6 +326,7 @@ class AtmeexLocalChannel:
                     got = self._process_frame(raw, writer, answer=up_writer is None)
                     if got:
                         mac = got
+                        session["mac"] = got
         except (ConnectionError, asyncio.IncompleteReadError):
             pass
         except Exception:  # noqa: BLE001 — сервер не должен падать из-за одного клиента
@@ -449,29 +467,62 @@ class AtmeexLocalChannel:
             return
 
     async def _relay_upstream(
-        self, up_reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        self,
+        up_reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        session: dict[str, Any] | None = None,
     ) -> None:
         """Ответы облака — устройству, байт в байт.
 
-        С включённым отладочным логом заодно показывает команды облака: так
+        Заодно сторожит тишину: если облако молчит дольше
+        UPSTREAM_SILENCE_TIMEOUT, связь с ним считается мёртвой и сессия
+        устройства разрывается. Иначе бризер остаётся на канале, который
+        никуда не ведёт: показания идут, а команды облака теряются.
+
+        С включённым отладочным логом показывает команды облака — так
         снимаются настоящие имена команд, которые приложение ни разу не
-        отправляло при записи трафика. Опрос get_state/get_setp не пишем —
+        отправляло при записи трафика. Опрос get_state/get_setp не пишем:
         он идёт каждые несколько секунд.
         """
         tail = ""
+        reason = ""
         try:
             while True:
-                chunk = await up_reader.read(READ_CHUNK)
-                if not chunk:
+                try:
+                    async with asyncio.timeout(UPSTREAM_SILENCE_TIMEOUT):
+                        chunk = await up_reader.read(READ_CHUNK)
+                except TimeoutError:
+                    reason = f"облако молчит дольше {UPSTREAM_SILENCE_TIMEOUT} с"
                     break
+                if not chunk:
+                    reason = "облако закрыло встречное соединение"
+                    break
+                mac = (session or {}).get("mac")
+                if mac:
+                    self.upstream_seen[mac] = time.monotonic()
                 writer.write(chunk)
                 await writer.drain()
                 if _LOGGER.isEnabledFor(logging.DEBUG):
                     tail = self._log_cloud_commands(tail + chunk.decode(errors="replace"))
         except (ConnectionError, asyncio.CancelledError):
-            pass
+            return
         except Exception:  # noqa: BLE001
             _LOGGER.debug("Atmeex: обрыв ответного потока от облака", exc_info=True)
+            reason = "ошибка встречного соединения"
+
+        # Досюда доходим, только если облако отвалилось, а устройство ещё с
+        # нами. Молча оставлять его на канале нельзя: показания шли бы, а
+        # команды облака терялись. Рвём сессию — бризер переподключится, и
+        # встречное соединение откроется заново.
+        if reason:
+            _LOGGER.warning(
+                "Atmeex: %s — разрываю сессию устройства %s, чтобы оно "
+                "переподключилось через облако",
+                reason,
+                (session or {}).get("mac") or "(ещё не представилось)",
+            )
+        with contextlib.suppress(Exception):
+            writer.close()
 
     @staticmethod
     def _log_cloud_commands(buf: str) -> str:

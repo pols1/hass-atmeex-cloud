@@ -12,6 +12,8 @@ async_redact_data закрывает значения по ключу, но не
 
 from __future__ import annotations
 
+import time
+
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -57,11 +59,19 @@ def _local_snapshot(channel: Any, devices: list[Any]) -> dict[str, Any] | None:
     for n, mac in enumerate(sorted(seen - ids.keys()), start=1):
         ids[mac] = f"unmatched_{n}"
 
+    now = time.monotonic()
     return {
         "port": channel.port,
         "connected": sorted(ids[mac] for mac, on in channel.connected.items() if on),
         "states": {ids[mac]: state for mac, state in channel.states.items()},
         "setpoints": {ids[mac]: setp for mac, setp in channel.setpoints.items()},
+        # Сколько секунд назад приходил кадр ОТ ОБЛАКА по каждому устройству.
+        # Растущее значение означает, что канал ведёт в никуда: показания идут,
+        # а команды облака до бризера не доходят (см. local_channel.py).
+        "seconds_since_cloud_frame": {
+            ids[mac]: round(now - seen, 1)
+            for mac, seen in getattr(channel, "upstream_seen", {}).items()
+        },
     }
 
 

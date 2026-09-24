@@ -16,6 +16,7 @@ import asyncio
 import json
 import pathlib
 import sys
+import time
 import types
 import unittest
 from collections.abc import Iterable, Mapping
@@ -125,6 +126,9 @@ class _Channel:
         self.connected = {known: True, stray: True}
         self.states = {known: {"temp_room": 214}, stray: {"temp_room": 190}}
         self.setpoints = {known: {"u_fan_speed": 3}}
+        # Кадр от облака по известному устройству пришёл только что,
+        # по второму — две минуты назад: канал ведёт в никуда.
+        self.upstream_seen = {known: time.monotonic(), stray: time.monotonic() - 120}
 
 
 class _Coordinator:
@@ -209,6 +213,13 @@ class DiagnosticsTest(unittest.TestCase):
             diagnostics.async_get_config_entry_diagnostics(_hass(local=False), _Entry())
         )
         self.assertIsNone(diag["local_channel"])
+
+    def test_cloud_frame_age_is_keyed_by_device_id(self) -> None:
+        diag = asyncio.run(diagnostics.async_get_config_entry_diagnostics(_hass(), _Entry()))
+        ages = diag["local_channel"]["seconds_since_cloud_frame"]
+        self._assert_clean(diag)
+        self.assertLess(ages["12746"], 5)
+        self.assertGreaterEqual(ages["unmatched_1"], 120)
 
     def test_cloud_push_status(self) -> None:
         diag = asyncio.run(diagnostics.async_get_config_entry_diagnostics(_hass(), _Entry()))

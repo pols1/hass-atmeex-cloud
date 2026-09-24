@@ -176,6 +176,12 @@ replies lacked the line ending the firmware waits for (see below), so this stand
 most likely never woke a device; it is fixed now but has not yet been seen through a real
 vendor outage.
 
+If the link to the cloud goes quiet for two minutes, the channel drops the device session
+so the unit reconnects through a fresh link, and says why in the log. The cloud polls each
+device constantly, so silence that long means the link is dead — and a channel that leads
+nowhere keeps readings flowing while commands from the cloud disappear. The diagnostics
+download reports, per device, how long ago a frame arrived from the cloud.
+
 Commands can also travel this way; see **Command path** under Options. The cloud terminates
 every frame it sends to the device with a newline, while the device writes to the cloud with
 no separator at all; until 0.8.0 the channel sent its commands without that newline and the

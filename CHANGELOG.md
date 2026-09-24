@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.1] — 2026-09-24
+
+### Fixed
+- **The local channel could keep a unit to itself while its link to the cloud was dead.**
+  Found on a live install: a bedroom unit ran for two days against its schedule while Home
+  Assistant and the vendor both believed it was off. The channel had lost its connection to
+  the cloud without noticing — it went on serving the device and feeding readings to Home
+  Assistant, so nothing looked wrong, but the cloud no longer saw the unit and commands from
+  it, the schedule included, went nowhere. Not one line of log said so. The channel now
+  watches for silence from the cloud: the cloud polls each device constantly (in a captured
+  session the longest gap between its frames was 8.1 s across 66 connections), so two
+  minutes without a single byte means the link is gone. The device session is then dropped
+  with a warning naming the reason, and the unit reconnects through a fresh link. A clean
+  close by the cloud is treated the same way — before, it left the same silent half-dead
+  state.
+- Diagnostics report, per device, how long ago a frame arrived **from the cloud**. A growing
+  number is the symptom above, visible before anyone notices a schedule was skipped.
+
 ## [0.8.0] — 2026-09-19
 
 Live updates from the vendor's cloud WebSocket with nothing to set up on the network; the
