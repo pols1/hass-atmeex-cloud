@@ -4,6 +4,17 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] — 2026-10-22
+
+### Added
+- **`atmeex_cloud.seed_devices` — setting the device list by hand.** 0.9.0 restores the list
+  from what the integration remembered, which assumes at least one successful poll since the
+  upgrade. An install whose cloud went away *first* has nothing to restore: no entities, while
+  the units sit healthy on the network. Found immediately on the install 0.9.0 was built for.
+  The service takes the same fields the cloud would have supplied — cloud id and MAC per
+  device — writes them into the config entry and reloads it. The log now names the service
+  when it hits this case, instead of only reporting that the cloud is unreachable.
+
 ## [0.9.0] — 2026-10-22
 
 The integration keeps working when the Atmeex cloud does not.

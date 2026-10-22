@@ -34,7 +34,7 @@ from .const import (
     PUSH_FRESH_SECONDS,
 )
 from .data_merge import cloud_lags_behind_device, payload_differs
-from .offline_cache import cache_fingerprint, cache_payload, restore
+from .offline_cache import cache_fingerprint, cache_payload, merge_seed, restore
 from .local_channel import AtmeexLocalChannel, normalize_mac
 from .reload_policy import RELOAD_DATA_KEYS, needs_reload
 
@@ -43,8 +43,49 @@ _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(seconds=30)
 
 
+SERVICE_SEED_DEVICES = "seed_devices"
+
+
+async def _async_register_services(hass: HomeAssistant) -> None:
+    """Команда ручного задания состава устройств.
+
+    Состав приходит из облака, и локальный режим восстанавливает его из
+    сохранённого. Но если облако стало недоступно РАНЬШЕ, чем интеграция
+    успела его запомнить, восстанавливать нечего: ни одной сущности, при
+    живых бризерах в сети. Тогда состав задаётся руками — те же поля, что
+    пришли бы из облака.
+    """
+    if hass.services.has_service(DOMAIN, SERVICE_SEED_DEVICES):
+        return
+
+    async def seed_devices(call) -> None:
+        seed = call.data.get("devices")
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            _LOGGER.error("Atmeex: нет записи интеграции, задавать состав некуда")
+            return
+        for entry in entries:
+            merged = merge_seed(entry.data.get(DATA_DEVICES_CACHE), seed)
+            if not merged:
+                _LOGGER.error(
+                    "Atmeex: в списке нет ни одного устройства с id — состав не изменён"
+                )
+                return
+            hass.config_entries.async_update_entry(
+                entry, data={**entry.data, DATA_DEVICES_CACHE: merged}
+            )
+            _LOGGER.warning(
+                "Atmeex: состав задан вручную (%s). Перезагружаю запись",
+                ", ".join(str(d.get("id")) for d in merged),
+            )
+            await hass.config_entries.async_reload(entry.entry_id)
+
+    hass.services.async_register(DOMAIN, SERVICE_SEED_DEVICES, seed_devices)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Atmeex Cloud from a config entry."""
+    await _async_register_services(hass)
     session = async_get_clientsession(hass)
 
     email = entry.data.get(CONF_EMAIL)
@@ -198,6 +239,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         cause = coordinator.last_exception
         if not (cached and local_enabled):
             # Работать не на чем: ни состава устройств, ни локального канала.
+            if local_enabled and not cached:
+                _LOGGER.warning(
+                    "Atmeex: облако недоступно (%s), а состав устройств ещё не "
+                    "запомнен — восстанавливать нечего. Задайте его вручную "
+                    "командой %s.%s (нужны облачный id и MAC каждого бризера), "
+                    "и локальный канал поднимется без облака",
+                    cause,
+                    DOMAIN,
+                    SERVICE_SEED_DEVICES,
+                )
             if isinstance(cause, ConfigEntryAuthFailed):
                 raise cause
             raise ConfigEntryNotReady(str(cause) or "Облако Atmeex недоступно")

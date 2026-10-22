@@ -62,3 +62,21 @@ def restore(cached: Any) -> dict[str, Any]:
     for dev in cache_payload(cached):
         devices.append({**dev, "online": False, "condition": {}, "settings": {}})
     return {"devices": devices, "states": {}}
+
+
+def merge_seed(cached: Any, seed: Any) -> list[dict[str, Any]]:
+    """Дополнить сохранённый состав вручную заданным.
+
+    Нужно, когда облако стало недоступно раньше, чем интеграция успела
+    запомнить состав: восстанавливать тогда нечего. Руками задаются те же
+    поля, что пришли бы из облака; совпадающие по id записи обновляются,
+    остальные остаются как были.
+    """
+    by_id: dict[str, dict[str, Any]] = {
+        str(dev["id"]): dev for dev in cache_payload(cached)
+    }
+    for dev in cache_payload(seed):
+        did = str(dev["id"])
+        by_id[did] = {**by_id.get(did, {}), **dev}
+    return [by_id[key] for key in sorted(by_id)]
+

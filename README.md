@@ -160,7 +160,10 @@ The brizers do not listen on any port — verified by a full TCP scan (1–10000
 `ws.iot.atmeex.com:3001` and talks plain JSON over it, with no TLS. So local access means
 being on the receiving end of that connection, not connecting to the device.
 
-**When the cloud is unreachable, the integration keeps running on this channel alone.** The
+**When the cloud is unreachable, the integration keeps running on this channel alone.** This
+needs the device list, which is remembered from a successful poll; if the cloud went away
+before the integration ever saw it, call `atmeex_cloud.seed_devices` with each unit's cloud id
+and MAC to supply it by hand. The
 device list is remembered, so the same entities come back after a restart and take their
 readings and commands from the units directly; they start as unavailable until a unit has
 actually been spoken to. The cloud is retried in the background and takes over when it

@@ -25,6 +25,7 @@ _spec.loader.exec_module(_mod)
 cache_payload = _mod.cache_payload
 cache_fingerprint = _mod.cache_fingerprint
 restore = _mod.restore
+merge_seed = _mod.merge_seed
 
 # Ответ облака как есть: с телеметрией, владельцем и сессией.
 CLOUD_DEVICES = [
@@ -137,6 +138,39 @@ class RestoreTest(unittest.TestCase):
     def test_empty_cache_gives_empty_data(self) -> None:
         self.assertEqual(restore(None), {"devices": [], "states": {}})
         self.assertEqual(restore([]), {"devices": [], "states": {}})
+
+
+class MergeSeedTest(unittest.TestCase):
+    """Ручное задание состава: когда облако умерло раньше, чем мы запомнили."""
+
+    SEED = [
+        {"id": 12746, "mac": "B0:A7:32:5A:79:BC", "name": "Бризер спальня"},
+        {"id": 17428, "mac": "84:1F:E8:A5:D7:A0", "name": "Бризер"},
+    ]
+
+    def test_seed_on_empty_cache(self) -> None:
+        merged = merge_seed(None, self.SEED)
+        self.assertEqual([d["id"] for d in merged], [12746, 17428])
+        self.assertEqual(merged[0]["mac"], "B0:A7:32:5A:79:BC")
+
+    def test_seed_updates_matching_device_and_keeps_the_rest(self) -> None:
+        merged = merge_seed(
+            cache_payload(CLOUD_DEVICES), [{"id": 12746, "name": "Спальня"}]
+        )
+        by_id = {d["id"]: d for d in merged}
+        self.assertEqual(by_id[12746]["name"], "Спальня")
+        # MAC из прежнего кэша не потерялся, второе устройство не тронуто
+        self.assertEqual(by_id[12746]["mac"], "B0:A7:32:5A:79:BC")
+        self.assertEqual(by_id[17428]["name"], "Бризер")
+
+    def test_seed_without_id_is_ignored(self) -> None:
+        merged = merge_seed(self.SEED, [{"mac": "02:00:00:00:00:01"}, "мусор"])
+        self.assertEqual(len(merged), 2)
+
+    def test_seeded_cache_restores(self) -> None:
+        data = restore(merge_seed(None, self.SEED))
+        self.assertEqual(len(data["devices"]), 2)
+        self.assertIs(data["devices"][0]["online"], False)
 
 
 if __name__ == "__main__":
