@@ -85,6 +85,9 @@ def _diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     if coordinator is not None:
         coordinator_info = {
             "last_update_success": coordinator.last_update_success,
+            # Работаем ли сейчас без облака: устройства взяты из сохранённого
+            # состава, значения и команды идут локальным каналом.
+            "cloud_available": coordinator.last_update_success,
             "last_exception": (
                 repr(coordinator.last_exception) if coordinator.last_exception else None
             ),

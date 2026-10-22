@@ -9,7 +9,7 @@ import aiohttp
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -23,6 +23,7 @@ from .const import (
     CONF_LOCAL_PORT,
     CONF_WRITE_MODE,
     DATA_CAPABILITIES,
+    DATA_DEVICES_CACHE,
     DEFAULT_CLOUD_PUSH,
     DEFAULT_WRITE_MODE,
     DEFAULT_LOCAL_ENABLED,
@@ -33,6 +34,7 @@ from .const import (
     PUSH_FRESH_SECONDS,
 )
 from .data_merge import cloud_lags_behind_device, payload_differs
+from .offline_cache import cache_fingerprint, cache_payload, restore
 from .local_channel import AtmeexLocalChannel, normalize_mac
 from .reload_policy import RELOAD_DATA_KEYS, needs_reload
 
@@ -174,6 +176,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             [d.get("id") for d in devices if isinstance(d, dict)],
         )
         _async_learn_capabilities(hass, entry, devices, states)
+        _async_remember_devices(hass, entry, devices)
         return {"devices": devices, "states": states}
 
     coordinator = DataUpdateCoordinator(
@@ -184,7 +187,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         update_interval=SCAN_INTERVAL,
     )
 
-    await coordinator.async_config_entry_first_refresh()
+    # Не async_config_entry_first_refresh: он прерывает настройку, когда
+    # облако молчит, и локальный канал тогда не поднимается вовсе — хотя
+    # заведён ровно для этого случая. async_refresh ошибку не бросает и при
+    # отказе авторизации сам открывает повторный вход (HA, update_coordinator).
+    await coordinator.async_refresh()
+    if not coordinator.last_update_success:
+        cached = entry.data.get(DATA_DEVICES_CACHE)
+        local_enabled = entry.options.get(CONF_LOCAL_ENABLED, DEFAULT_LOCAL_ENABLED)
+        cause = coordinator.last_exception
+        if not (cached and local_enabled):
+            # Работать не на чем: ни состава устройств, ни локального канала.
+            if isinstance(cause, ConfigEntryAuthFailed):
+                raise cause
+            raise ConfigEntryNotReady(str(cause) or "Облако Atmeex недоступно")
+
+        coordinator.data = restore(cached)
+        _LOGGER.warning(
+            "Atmeex: облако недоступно (%s). Работаю только локальным каналом: "
+            "устройства взяты из сохранённого состава (%s), показания и "
+            "управление — напрямую с бризеров",
+            cause,
+            ", ".join(str(d.get("id")) for d in coordinator.data["devices"]),
+        )
 
     async def refresh_device(device_id: int | str) -> None:
         """
@@ -206,6 +231,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         channel_getter=lambda: channels.get("local"),
         mac_getter=_mac_for,
         mode=entry.options.get(CONF_WRITE_MODE, DEFAULT_WRITE_MODE),
+        cloud_healthy=lambda: coordinator.last_update_success,
     )
 
     hass.data.setdefault(DOMAIN, {})
@@ -254,6 +280,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         email,
     )
     return True
+
+
+def _async_remember_devices(
+    hass: HomeAssistant, entry: ConfigEntry, devices: list[Any]
+) -> None:
+    """Сохранить состав устройств на случай недоступного облака.
+
+    Запись конфигурации пишется на диск, поэтому трогаем её, только когда
+    состав действительно изменился, а не на каждый опрос раз в 30 секунд.
+    """
+    payload = cache_payload(devices)
+    if not payload:
+        return
+    stored = entry.data.get(DATA_DEVICES_CACHE)
+    if cache_fingerprint(stored) == cache_fingerprint(payload):
+        return
+    _LOGGER.info(
+        "Atmeex: запомнил состав устройств (%s) — пригодится, если облако ляжет",
+        ", ".join(str(d.get("id")) for d in payload),
+    )
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, DATA_DEVICES_CACHE: payload}
+    )
 
 
 def _async_learn_capabilities(

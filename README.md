@@ -160,6 +160,12 @@ The brizers do not listen on any port — verified by a full TCP scan (1–10000
 `ws.iot.atmeex.com:3001` and talks plain JSON over it, with no TLS. So local access means
 being on the receiving end of that connection, not connecting to the device.
 
+**When the cloud is unreachable, the integration keeps running on this channel alone.** The
+device list is remembered, so the same entities come back after a restart and take their
+readings and commands from the units directly; they start as unavailable until a unit has
+actually been spoken to. The cloud is retried in the background and takes over when it
+answers again.
+
 **Since Cloud push most installs do not need this.** Live updates now come from the cloud
 without touching the network. The local channel is for two things push cannot do: keeping
 a unit reachable while the vendor's cloud is down, and sending commands straight to the

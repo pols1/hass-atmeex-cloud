@@ -4,6 +4,36 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] — 2026-10-22
+
+The integration keeps working when the Atmeex cloud does not.
+
+### Added
+- **Local-only mode.** Until now a failed cloud sign-in aborted setup: every entity
+  disappeared and the local channel — built for exactly this situation — never started,
+  because the failure happened first. The device list is now remembered in the config entry
+  and restored when the cloud is unreachable, so the same entities come back and take their
+  readings and commands from the local channel. Restored devices start as unavailable: until
+  a unit has actually been spoken to, an invented state would be worse than none. The cloud
+  keeps being retried in the background and takes over again as soon as it answers.
+  Home Assistant's own re-login prompt still appears for a rejected account.
+- Only what the entities need is cached — cloud id, MAC, name, model, firmware. Owner,
+  session and telemetry are not: one has no business there, the other is stale within
+  minutes. The entry is rewritten only when the set of devices actually changes, not on
+  every 30-second poll.
+
+### Changed
+- **While the cloud is known to be down, `cloud_first` goes straight to the device.** It used
+  to wait out a cloud timeout on every single command before falling back. `cloud_only` is
+  unchanged: it never touches the local channel.
+- Diagnostics report whether the cloud is currently answering.
+
+### Why now
+On 19.10.2026 the vendor began refusing this account (`403 Аккаунт не допущен к
+тестированию`) and invalidated the stored session; the API then moved to a new address whose
+port 443 does not answer from the affected network at all. Both breezers were healthy on the
+LAN the whole time, and both were unreachable from Home Assistant.
+
 ## [0.8.2] — 2026-09-24
 
 ### Fixed

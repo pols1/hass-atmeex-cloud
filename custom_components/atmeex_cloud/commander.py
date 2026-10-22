@@ -33,11 +33,16 @@ class AtmeexCommander:
         channel_getter: Callable[[], Any | None],
         mac_getter: Callable[[int | str], str | None],
         mode: str = WRITE_CLOUD_FIRST,
+        cloud_healthy: Callable[[], bool] | None = None,
     ) -> None:
         self._api = api
         self._channel = channel_getter
         self._mac = mac_getter
         self._mode = mode
+        # Отвечает, отвечало ли облако на последнем опросе. Когда оно лежит,
+        # cloud_first ждал бы таймаут на каждой команде, прежде чем уйти в
+        # канал, — а устройство всё это время рядом и слушает.
+        self._cloud_healthy = cloud_healthy or (lambda: True)
 
     @property
     def mode(self) -> str:
@@ -58,7 +63,10 @@ class AtmeexCommander:
         if not clean:
             return None
 
-        if self._mode == WRITE_LOCAL_FIRST and await self._send_local(device_id, clean):
+        local_first = self._mode == WRITE_LOCAL_FIRST or (
+            self._mode == WRITE_CLOUD_FIRST and not self._cloud_healthy()
+        )
+        if local_first and await self._send_local(device_id, clean):
             return None
 
         if self._mode in (WRITE_CLOUD_FIRST, WRITE_CLOUD_ONLY, WRITE_LOCAL_FIRST):

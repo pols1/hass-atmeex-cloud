@@ -715,6 +715,44 @@ class TestCommanderPolicy(unittest.IsolatedAsyncioTestCase):
         await c.set_target_temperature(17428, 18.0)
         self.assertEqual(self.api_calls[-1][1], {"u_temp_room": 180})
 
+    async def test_cloud_first_goes_local_while_the_cloud_is_down(self):
+        # Облако лежит (вендор отклонил аккаунт 19.10.2026): ждать его
+        # таймаут на каждой команде незачем, устройство рядом и слушает.
+        c = self.commander_mod.AtmeexCommander(
+            self.FakeApi(fail=True),
+            channel_getter=lambda: self.FakeChannel(),
+            mac_getter=lambda did: MAC,
+            mode="cloud_first",
+            cloud_healthy=lambda: False,
+        )
+        await c.set_power(17428, True)
+        self.assertEqual(self.local_calls, [(MAC, {"u_pwr_on": True})])
+        self.assertEqual(self.api_calls, [], "облако лежит — в него не стучимся")
+
+    async def test_cloud_first_still_prefers_the_cloud_while_it_answers(self):
+        c = self.commander_mod.AtmeexCommander(
+            self.FakeApi(),
+            channel_getter=lambda: self.FakeChannel(),
+            mac_getter=lambda did: MAC,
+            mode="cloud_first",
+            cloud_healthy=lambda: True,
+        )
+        await c.set_power(17428, True)
+        self.assertEqual(self.api_calls, [(17428, {"u_pwr_on": True})])
+        self.assertEqual(self.local_calls, [])
+
+    async def test_cloud_only_stays_in_the_cloud_even_when_it_is_down(self):
+        c = self.commander_mod.AtmeexCommander(
+            self.FakeApi(fail=True),
+            channel_getter=lambda: self.FakeChannel(),
+            mac_getter=lambda did: MAC,
+            mode="cloud_only",
+            cloud_healthy=lambda: False,
+        )
+        with self.assertRaises(Exception):
+            await c.set_power(17428, True)
+        self.assertEqual(self.local_calls, [], "cloud_only обязан остаться в облаке")
+
     async def test_mode_switches_live(self):
         # Смена режима не перезагружает интеграцию — иначе закрылся бы канал,
         # ради которого режим меняют.
