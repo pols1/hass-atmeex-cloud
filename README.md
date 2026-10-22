@@ -188,7 +188,9 @@ vendor outage.
 A channel that stops passing the stream on keeps readings flowing while commands from the
 cloud disappear, so it is watched for. Every state frame carries a timestamp set by the unit,
 and the cloud stores that same timestamp: when frames keep arriving here while the cloud's
-copy stops advancing, the link is gone. The device session is then dropped with a warning
+copy stops advancing, the link is gone. Silence from the cloud is not a symptom and is not
+watched for — on a long-lived session it can last hours, since the cloud receives the
+telemetry and has no reason to speak. The device session is then dropped with a warning
 and the unit reconnects through a fresh link. The diagnostics download reports, per device,
 how long ago a frame arrived from the cloud.
 

@@ -457,14 +457,17 @@ class TestDeadUpstreamIsNoticed(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(reader.read(1), timeout=0.1)
         self.fail(message)
 
-    async def test_silent_cloud_drops_the_session(self):
-        _mod.UPSTREAM_SILENCE_TIMEOUT = 0.3  # не ждать две минуты в тесте
-        self.addCleanup(setattr, _mod, "UPSTREAM_SILENCE_TIMEOUT", 120)
+    async def test_silence_from_the_cloud_does_NOT_drop_the_session(self):
+        """Отрицательный контроль к дважды сделанной ошибке.
 
+        Пороги на молчание облака ставились дважды — 120 с и 900 с — и оба
+        раза рвали исправные сессии: 24.09 каждые пару минут, 22.10 каждые
+        15 минут. На живом соединении облако молчит часами, потому что
+        телеметрию получает и отвечать ему незачем.
+        """
         seen = asyncio.Event()
 
         async def mute_cloud(r, w):
-            # Принимаем поток устройства и не отвечаем ни байтом.
             seen.set()
             with contextlib.suppress(Exception):
                 while await r.read(4096):
@@ -475,14 +478,12 @@ class TestDeadUpstreamIsNoticed(unittest.IsolatedAsyncioTestCase):
         reader, _ = await self._device(channel)
         await asyncio.wait_for(seen.wait(), timeout=5)
 
-        with self.assertLogs(_mod._LOGGER, level="WARNING") as logs:
-            await self._assert_disconnected(
-                reader, "сессия не разорвана, хотя облако молчит"
-            )
-        self.assertTrue(
-            any("молчит" in r.getMessage() for r in logs.records),
-            f"в логе нет причины разрыва: {[r.getMessage() for r in logs.records]}",
+        # Молчим заметно дольше любого прежнего порога в пересчёте на тест.
+        await asyncio.sleep(1.5)
+        self.assertFalse(
+            reader.at_eof(), "сессию разорвали из-за молчания облака — это и был дефект"
         )
+        self.assertTrue(channel.connected.get(MAC), "устройство должно остаться на канале")
 
     async def test_upstream_eof_drops_the_session(self):
         async def closing_cloud(r, w):

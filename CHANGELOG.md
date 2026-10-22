@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.2] — 2026-10-22
+
+### Fixed
+- **Silence from the cloud is no longer treated as a dead link — at any threshold.** The
+  watchdog added in 0.8.1 read two minutes of silence as an outage and dropped healthy
+  sessions every few minutes; 0.8.2 concluded the number was wrong and moved it to fifteen
+  minutes as a distant backstop. That was the same error with a larger number: on the live
+  install the backstop dropped a healthy session every fifteen minutes, six times in a row,
+  while the per-device counter showed the cloud staying silent for three and a half hours on
+  a session that was working perfectly. The cloud has no reason to speak — it receives the
+  telemetry anyway. The passive timeout is gone. A dead link is still detected, by the two
+  signals that mean something: the cloud closing the connection, and the cloud's own snapshot
+  falling behind the frames the device is sending us.
+- The test that asserted the old behaviour is replaced by a negative control: silence must
+  **not** drop the session.
+
 ## [0.9.1] — 2026-10-22
 
 ### Added
