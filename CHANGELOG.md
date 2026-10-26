@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.3] — 2026-10-26
+
+### Fixed
+- **The setup dialog blamed the connection for a refusal the cloud had plainly explained.**
+  `ApiAuthError` is a subclass of `ApiError`, and the flow caught only the parent, so every
+  failure — including a sign-in the server answered and rejected — came back as "cannot reach
+  the Atmeex cloud, check whether api.iot.atmeex.com is responding". The owner's reply was
+  exactly to the point: "but ping works". A rejection and an outage are now separate errors,
+  and the cloud's own words are shown instead of being left in the log.
+
+  What that dialog had been hiding this morning: `401 Аккаунт не найден. После аварии в
+  дата-центре Яндекса сервис восстановлен заново — зарегистрируйтесь и добавьте прибор
+  снова.` — the vendor lost its accounts in a data-centre failure and rebuilt the service.
+  That one sentence explains the whole week: the dead old address, the move to a new one, the
+  earlier `403 Аккаунт не допущен к тестированию`, and the account that stopped existing.
+
 ## [0.9.2] — 2026-10-22
 
 ### Fixed

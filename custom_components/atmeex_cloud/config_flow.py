@@ -27,7 +27,8 @@ from .const import (
     DEFAULT_LOCAL_PORT,
     DOMAIN,
 )
-from .api import AtmeexApi, ApiError
+from .api import AtmeexApi, ApiAuthError, ApiError
+from .vendor_message import vendor_message
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,6 +70,7 @@ class AtmeexCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Первый шаг мастера — ввод email/пароля."""
         errors: dict[str, str] = {}
+        reason = ""
 
         if user_input is not None:
             email = user_input[CONF_EMAIL].strip()
@@ -80,10 +82,16 @@ class AtmeexCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             try:
                 await _test_credentials(self.hass, email, password)
+            except ApiAuthError as err:
+                # Облако ОТВЕТИЛО и отказало — это не проблема связи. Раньше
+                # оба случая показывались как «не удаётся связаться», и 26.10
+                # пользователь справедливо возразил: «хотя пинг есть».
+                _LOGGER.error("Atmeex: вход отклонён облаком: %s", err)
+                reason = vendor_message(err)
+                errors["base"] = "invalid_auth"
             except ApiError as err:
                 _LOGGER.error("Error communicating with Atmeex API: %s", err)
-                # тут можно было бы различать invalid_auth / cannot_connect,
-                # но сервер часто отдаёт 500, поэтому делаем один тип ошибки
+                reason = vendor_message(err)
                 errors["base"] = "cannot_connect"
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Unexpected error during Atmeex auth")
@@ -109,6 +117,9 @@ class AtmeexCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=data_schema,
             errors=errors,
+            # Ответ облака попадает в текст ошибки: его подставляет сам HA
+            # (frontend localize с description_placeholders шага).
+            description_placeholders={"reason": reason},
         )
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
@@ -121,13 +132,19 @@ class AtmeexCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Confirm re-authentication with new password."""
         errors: dict[str, str] = {}
+        reason = ""
 
         if user_input is not None:
             password = user_input[CONF_PASSWORD]
             try:
                 await _test_credentials(self.hass, self._reauth_email, password)
+            except ApiAuthError as err:
+                _LOGGER.error("Atmeex: повторный вход отклонён облаком: %s", err)
+                reason = vendor_message(err)
+                errors["base"] = "invalid_auth"
             except ApiError as err:
                 _LOGGER.error("Error communicating with Atmeex API during reauth: %s", err)
+                reason = vendor_message(err)
                 errors["base"] = "cannot_connect"
             except Exception:
                 _LOGGER.exception("Unexpected error during Atmeex reauth")
@@ -154,7 +171,10 @@ class AtmeexCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="reauth_confirm",
             data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
             errors=errors,
-            description_placeholders={"email": getattr(self, "_reauth_email", "")},
+            description_placeholders={
+                "email": getattr(self, "_reauth_email", ""),
+                "reason": reason,
+            },
         )
 
 class AtmeexOptionsFlowHandler(config_entries.OptionsFlow):

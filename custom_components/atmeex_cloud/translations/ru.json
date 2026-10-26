@@ -18,7 +18,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Не удаётся связаться с облаком Atmeex. Проверьте учётные данные и отвечает ли api.iot.atmeex.com.",
+      "invalid_auth": "Облако Atmeex отклонило вход: {reason}",
+      "cannot_connect": "Не удалось достучаться до облака Atmeex (api.iot.atmeex.com). {reason}",
       "unknown": "Непредвиденная ошибка, подробности в журнале Home Assistant."
     },
     "abort": {

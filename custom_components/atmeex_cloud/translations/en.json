@@ -18,7 +18,8 @@
       }
     },
     "error": {
-      "cannot_connect": "Cannot reach the Atmeex cloud. Check your credentials and whether api.iot.atmeex.com is responding.",
+      "invalid_auth": "The Atmeex cloud refused the sign-in: {reason}",
+      "cannot_connect": "Could not reach the Atmeex cloud (api.iot.atmeex.com). {reason}",
       "unknown": "Unexpected error, see the Home Assistant log for details."
     },
     "abort": {
