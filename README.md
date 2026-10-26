@@ -203,6 +203,13 @@ and `set_hum_stg`; `set_temp_room`, `set_auto` and `set_night` are still inferre
 setpoint names. A unit that is off with an empty tank refuses a humidification stage from
 the cloud and locally alike.
 
+The cloud rebuilt after the October 2026 data-centre failure no longer takes the cooling
+setpoint: `PUT /devices/<id>/params` with `u_cool_mode` comes back as
+`422 Неподдерживаемая команда: u_cool_mode`, and the settings object it returns no longer
+carries that key either. Since 0.9.4 the integration sends it only where cooling is switched
+on in the entry's options; `u_pwr_on` and `u_fan_speed` were confirmed accepted on the same
+day by live calls.
+
 ### Redirecting the traffic
 
 The integration cannot redirect traffic to itself — that is a network change you make once.

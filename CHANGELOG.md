@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.4] — 2026-10-26
+
+### Fixed
+- **Switching a breezer on failed against the rebuilt cloud.** Every `fan_only` ever sent
+  from Home Assistant carried a second command — "switch on, then clear cooling" — even on
+  an entry where cooling is off and `cool` is not among the offered modes. The rebuilt cloud
+  answers that one with `422 Неподдерживаемая команда: u_cool_mode`, and the refusal came
+  back out of `climate.set_hvac_mode`: on the live install the living-room automation stopped
+  on its first action and never reached the fan speed. The same signal was already visible in
+  the settings the cloud returns — `u_cool_mode` is no longer among them. The cooling command
+  is now sent only where cooling is switched on in the entry's options. `u_pwr_on` and
+  `u_fan_speed` were confirmed accepted by live calls the same day.
+
 ## [0.9.3] — 2026-10-26
 
 ### Fixed

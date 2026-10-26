@@ -24,6 +24,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 
 from .capabilities import CAP_HUMIDIFIER, resolve
 from .const import CONF_HUMIDIFIER, DATA_CAPABILITIES, DEFAULT_CAP_MODE, DOMAIN
+from .hvac_commands import COOL, POWER, commands_for_mode
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -290,16 +291,17 @@ class AtmeexClimateEntity(CoordinatorEntity, ClimateEntity):
         return HVACMode.FAN_ONLY
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        if hvac_mode == HVACMode.OFF:
-            await self.api.set_power(self._device_id, False)
-        elif hvac_mode == HVACMode.COOL:
-            # Сначала включаем, затем переводим в COOL
-            await self.api.set_power(self._device_id, True)
-            await self.api.set_cool_mode(self._device_id, True)
-        else:
-            # FAN_ONLY: включаем и отключаем COOL
-            await self.api.set_power(self._device_id, True)
-            await self.api.set_cool_mode(self._device_id, False)
+        # Команду охлаждения отправляем только там, где охлаждение включено:
+        # восстановленное облако отвечает на u_cool_mode 422 «Неподдерживаемая
+        # команда», и отказ ронял весь вызов (см. hvac_commands.py).
+        commands = commands_for_mode(
+            str(hvac_mode), cool_supported=HVACMode.COOL in self.hvac_modes
+        )
+        for command, value in commands:
+            if command == POWER:
+                await self.api.set_power(self._device_id, value)
+            elif command == COOL:
+                await self.api.set_cool_mode(self._device_id, value)
         await self._refresh()
 
     # ---------- Преднастройки (Presets) ----------
