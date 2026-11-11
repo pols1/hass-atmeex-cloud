@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.5] — 2026-11-11
+
+### Changed
+- **Climate temperatures move to the `native_` names of Home Assistant 2026.11.** That
+  release renamed the temperature properties a climate entity implements: the entity now
+  reports values in the unit its own device uses, and the core converts them for the user.
+  On the live install, 2026.11.1 logged three warnings on every load — `target_temperature`,
+  `current_temperature` and `_attr_temperature_unit` — each ending in "this will stop working
+  in Home Assistant 2027.11". Nothing was broken yet; this removes the warnings and the
+  deadline. `min_temp`, `max_temp` and `target_temperature_step` are untouched by the rename:
+  they were always in the device's own unit.
+- **Minimum Home Assistant is now 2026.11** (`hacs.json`), since the `native_` names exist
+  only from that release.
+- A self-check guards the rename: it reads `climate.py` and fails if a deprecated name
+  comes back.
+
 ## [0.9.4] — 2026-10-26
 
 ### Fixed

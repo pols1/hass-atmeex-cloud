@@ -122,8 +122,9 @@ would close the local channel, the very connection `local_first` relies on.
 
 ## Compatibility
 
-Tested against **Home Assistant 2026.8** (Python 3.14, Home Assistant OS); `hacs.json`
-declares 2026.7 as the minimum (that is when `UnitOfRatio` landed). The integration follows current core APIs: shared aiohttp
+Tested against **Home Assistant 2026.11** (Python 3.14, Home Assistant OS); `hacs.json`
+declares 2026.11 as the minimum, because the climate entity reports its temperatures under
+the `native_` names that landed in that release. The integration follows current core APIs: shared aiohttp
 session, `DataUpdateCoordinator`, config-entry re-auth, and an options flow that takes
 `config_entry` from the core rather than storing it itself. See [CHANGELOG.md](CHANGELOG.md)
 for version history.

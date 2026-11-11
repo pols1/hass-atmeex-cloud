@@ -132,7 +132,12 @@ class AtmeexClimateEntity(CoordinatorEntity, ClimateEntity):
     )
 
     _attr_preset_modes = [PRESET_NONE, PRESET_AUTO, PRESET_SLEEP]
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    # Имена с native_ пришли в Core 2026.11: прибор отдаёт температуру в своих
+    # единицах, а пересчёт в единицы пользователя делает сам Home Assistant.
+    # Прежние имена он принимает до 2027.11 и ругается в журнал на каждую
+    # загрузку. min_temp, max_temp и target_temperature_step переименования
+    # не касаются — они и были в единицах прибора.
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_precision = PRECISION_WHOLE
     _attr_target_temperature_step = 0.5
     _attr_min_temp = 10
@@ -337,18 +342,18 @@ class AtmeexClimateEntity(CoordinatorEntity, ClimateEntity):
     # ---------- Температура ----------
 
     @property
-    def current_temperature(self):
+    def native_current_temperature(self):
         val = self._state.get("temp_room")  # деци-°C
         return (val / 10) if isinstance(val, (int, float)) else None
 
     @property
-    def target_temperature(self):
+    def native_target_temperature(self):
         # u_temp_room в деци-градусах
         val = self._settings.get("u_temp_room")
         if isinstance(val, (int, float)):
             return val / 10
         # запасной вариант — текущая / 20.0
-        cur = self.current_temperature
+        cur = self.native_current_temperature
         return cur if isinstance(cur, (int, float)) else 20.0
 
     async def async_set_temperature(self, **kwargs) -> None:
